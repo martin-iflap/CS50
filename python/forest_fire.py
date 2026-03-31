@@ -27,7 +27,7 @@ current_layer = deque()
 fire_active: bool = False
 
 
-def update(img, pause_s: dict, exit_s: dict, p: float = 0.001, f: float = 0.0001) -> list:
+def update(img, pause_s: dict, exit_s: dict, p: float = 0.001, f: float = 0.0001, grow_while_fire: bool = True) -> list:
     """Update the grid for the animation. This function is called by FuncAnimation."""
     global current_layer, fire_active
 
@@ -39,9 +39,9 @@ def update(img, pause_s: dict, exit_s: dict, p: float = 0.001, f: float = 0.0001
         plt.close()
         return [img]
 
-    # if not fire_active:
-    growth = (grid == 0) & (np.random.rand(size, size) < p)
-    grid[growth] = 1
+    if not fire_active or grow_while_fire:
+        growth = (grid == 0) & (np.random.rand(size, size) < p)
+        grid[growth] = 1
 
     lightning = (grid == 1) & (np.random.rand(size, size) < f)
     grid[lightning] = 2
@@ -80,14 +80,25 @@ def main() -> None:
     ax.set_title("Forest Fire Simulation")
     plt.subplots_adjust(bottom=0.12, top=0.80)
 
-    # Variables to hold slider values
-    params = {'p': 0.001, 'f': 0.0001}
+    # Variables to hold slider values and toggle state
+    params = {'p': 0.001, 'f': 0.0001, 'grow_while_fire': True}
 
     def update_p(val):
         params['p'] = val
 
     def update_f(val):
         params['f'] = val
+
+    def grow_while_fire_callback(event):
+        """Toggle grow_while_fire state when button is clicked."""
+        params['grow_while_fire'] = not params['grow_while_fire']
+        toggle_button.label.set_text('Grow During Fire: ON' if params['grow_while_fire'] else 'Grow During Fire: OFF')
+        plt.draw()
+
+    # Toggle button (grow while fire)
+    toggle_ax = plt.axes([0.25, 0.93, 0.50, 0.03])
+    toggle_button = Button(toggle_ax, 'Grow During Fire: ON', color='lightgreen', hovercolor='green')
+    toggle_button.on_clicked(grow_while_fire_callback)
 
     # p slider (tree growth probability)
     ax_p = plt.axes([0.15, 0.88, 0.25, 0.03])
@@ -108,24 +119,38 @@ def main() -> None:
         button.label.set_text('Resume' if pause_state['paused'] else 'Pause')
         plt.draw()
 
+    def clear_callback(event):
+        """Clear the grid and reset simulation state."""
+        global grid, current_layer, fire_active
+        grid[:] = 0
+        current_layer.clear()
+        fire_active = False
+        image.set_data(grid)
+        plt.draw()
+
     def exit_callback(event):
         """Exit the simulation when button is clicked."""
         exit_state['exit'] = True
         plt.close()
 
+    # clear button
+    clear_button_ax = plt.axes([0.32, 0.02, 0.08, 0.04])
+    clear_button = Button(clear_button_ax, 'Clear')
+    clear_button.on_clicked(clear_callback)
+
     # pause button
-    button_ax = plt.axes([0.40, 0.02, 0.08, 0.04])
+    button_ax = plt.axes([0.47, 0.02, 0.08, 0.04])
     button = Button(button_ax, 'Pause')
     button.on_clicked(pause_callback)
 
     # exit button
-    exit_button_ax = plt.axes([0.52, 0.02, 0.08, 0.04])
+    exit_button_ax = plt.axes([0.62, 0.02, 0.08, 0.04])
     exit_button = Button(exit_button_ax, 'Exit', hovercolor="red")
     exit_button.on_clicked(exit_callback)
 
     ani = FuncAnimation(
         fig,
-        lambda frame: update(image, pause_state, exit_state, params['p'], params['f']),
+        lambda frame: update(image, pause_state, exit_state, params['p'], params['f'], params['grow_while_fire']),
         interval=1,
         blit=True,
         cache_frame_data=False
