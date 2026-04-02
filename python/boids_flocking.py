@@ -4,18 +4,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib
 
-WIDTH = 300
-HEIGHT = 300
-N = 40 # number of boids
-SPEED = 5.0
-DRIFT_STRENGTH = 0.1
-PERCEPTION_RADIUS = 80
-TOO_CLOSE_RADIUS = 30
+WIDTH = 225
+HEIGHT = 225
+N = 300 # number of boids
+SPEED = 4.0
+DRIFT_STRENGTH = 0.8
+PERCEPTION_RADIUS = 40 *1.25
+TOO_CLOSE_RADIUS = 15 *1.25
+SMOOTHING = 0.55
 
-COH_WEIGHT = 1.0
-DRIFT_WEIGHT = 1.0
-SEP_WEIGHT = 20.0
-ALIGN_WEIGHT = 1.0
+COH_WEIGHT = 1.0     # 1.0
+DRIFT_WEIGHT = 0.5   # 0.5
+SEP_WEIGHT = 2.5     # 2.5
+ALIGN_WEIGHT = 1.4   # 1.4
 
 positions = None
 velocities = None
@@ -23,6 +24,29 @@ quiver = None
 
 
 matplotlib.use('TkAgg') # open a matplotlib window in Pycharm
+
+
+def rebuild_quiver(ax):
+    """Rebuild the quiver"""
+    global positions, velocities, quiver
+    if quiver is not None:
+        quiver.remove()
+
+    quiver = ax.quiver(
+        positions[:, 0], positions[:, 1],
+        velocities[:, 0], velocities[:, 1],
+        color='white',
+        scale=225,
+        scale_units='width',
+        width=0.002,
+        headwidth=3,
+        headlength=5,
+        headaxislength=3,
+        minlength=0.05,  # minimum rendered length before becoming a dot, in shaft widths
+        minshaft=0.15,  # minimum shaft length, prevents head-only rendering
+    )
+
+    return [quiver]
 
 
 def init_boids(ax):
@@ -34,8 +58,7 @@ def init_boids(ax):
     magnitudes = np.linalg.norm(velocities, axis=1, keepdims=True)
     velocities = (velocities / magnitudes) * SPEED
 
-    quiver = ax.quiver(positions[:, 0], positions[:, 1], velocities[:, 0], velocities[:, 1], color='white')
-    return [quiver]
+    return rebuild_quiver(ax)
 
 
 def apply_drift(posit, mask):
@@ -45,7 +68,7 @@ def apply_drift(posit, mask):
 
     for i in range(len_posit):
         neighbors = posit[mask[i]]
-        if len(neighbors) == 0:
+        if len(neighbors) > -1:
             drift_velocity = np.random.uniform(-1, 1, 2) * DRIFT_STRENGTH
             magnitude = np.linalg.norm(drift_velocity)
             steering[i] += drift_velocity / magnitude
@@ -94,14 +117,35 @@ def separation(posit, distances):
         neighbor_distances = distances[i][mask[i]]
         if len(neighbors) > 0:
             diff = posit[i] - neighbors
-            weights = (neighbor_distances ** 3)[:, np.newaxis]
+            weights = (neighbor_distances ** 4)[:, np.newaxis]
             steering[i] = np.sum(diff / weights, axis=0)
     return steering
 
 
-def move_boids():
+def move_boids(pending: dict, ax):
     """Move the boids according to the rules of alignment, cohesion, and separation."""
     global positions, velocities, quiver
+
+    resized = False
+
+    # add new boids
+    if pending['add'] > 0:
+        num = pending['add']
+        pending['add'] = 0
+        new_pos = np.random.uniform(0, [WIDTH, HEIGHT], (num, 2))
+        new_vel = np.random.uniform(-1, 1, (num, 2))
+        new_vel = (new_vel / np.linalg.norm(new_vel, axis=1, keepdims=True)) * SPEED
+        positions = np.vstack((positions, new_pos))
+        velocities = np.vstack((velocities, new_vel))
+        resized = True
+
+    # remove boids
+    if pending['remove'] > 0:
+        actual = min(pending['remove'], len(positions))
+        pending['remove'] = 0
+        positions = np.delete(positions, np.arange(actual), axis=0)
+        velocities = np.delete(velocities, np.arange(actual), axis=0)
+        resized = True
 
     diff = positions[np.newaxis, :, :] - positions[:, np.newaxis, :]
     distances = np.linalg.norm(diff, axis=2)
@@ -113,35 +157,40 @@ def move_boids():
     separation_velocities = separation(positions, distances)
 
     final_velocity = (velocities + COH_WEIGHT * cohesion_velocities + DRIFT_WEIGHT * drift_velocities + ALIGN_WEIGHT * alignment_velocities + SEP_WEIGHT * separation_velocities)
-    magnitude = np.linalg.norm(final_velocity, axis=1, keepdims=True)
-    velocities = (final_velocity / magnitude) * SPEED
+    magnitudes = np.linalg.norm(final_velocity, axis=1, keepdims=True)
+    magnitudes = np.maximum(magnitudes, 1e-5)
+    target = (final_velocity / magnitudes) * SPEED
+    smooth_velocities = velocities + SMOOTHING * (target - velocities)
+    magnitudes = np.linalg.norm(smooth_velocities, axis=1, keepdims=True)
+    magnitudes = np.maximum(magnitudes, 1e-5)
+    velocities = (smooth_velocities / magnitudes) * SPEED
+
     positions += velocities
     positions = np.mod(positions, [WIDTH, HEIGHT])
 
-    quiver.set_offsets(positions)
-    quiver.set_UVC(velocities[:, 0], velocities[:, 1])
+    if resized:
+        rebuild_quiver(ax)
+    else:
+        quiver.set_offsets(positions)
+        quiver.set_UVC(velocities[:, 0], velocities[:, 1])
 
     return [quiver]
 
 
-def update(pause_state: dict, exit_state: dict):
+def update(pause_state: dict, exit_state: dict, pending: dict, ax):
     """Main function to update the animation"""
     global quiver
-
-    if pause_state['paused']:
-        plt.pause(0.1)
-        return [quiver]
 
     if exit_state['exit']:
         plt.close()
         return [quiver]
 
-    return move_boids()
+    return move_boids(pending, ax)
 
 
 def main():
     """The main function to run the simulation"""
-    fig, axes = plt.subplots(1, 1, figsize=(7, 7))
+    fig, axes = plt.subplots(1, 1, figsize=(8, 8))
 
     axes.set_xlim(0, WIDTH)
     axes.set_ylim(0, HEIGHT)
@@ -149,25 +198,42 @@ def main():
 
     pause_state = {'paused': False}
     exit_state = {'exit': False}
+    ani_state = {'ani': None}
+    pending = {'add': 0, 'remove': 0}
 
     def pause_callback(event):
         """Toggle pause state when button is clicked."""
         pause_state['paused'] = not pause_state['paused']
-        button.label.set_text('Resume' if pause_state['paused'] else 'Pause')
-        plt.draw()
+        if pause_state['paused']:
+            button.label.set_text('Resume')
+            ani_state['ani'].pause()
+        else:
+            button.label.set_text('Pause')
+            ani_state['ani'].resume()
+        fig.canvas.draw()
 
     def reset_callback(event):
         """Reset the simulation"""
-        pass
+        global positions, velocities, quiver
+        positions, velocities = [], []
+        init_boids(axes)
 
     def exit_callback(event):
         """Exit the simulation when button is clicked."""
         exit_state['exit'] = True
         plt.close()
 
+    def add_callback(event, num: int = 10):
+        """Add boids to the simulation"""
+        pending['add'] += num
+
+    def remove_callback(event, num: int = 10):
+        """Remove boids from the simulation"""
+        pending['remove'] += num
+
     # reset button
     reset_button_ax = plt.axes([0.32, 0.02, 0.08, 0.04])
-    reset_button = Button(reset_button_ax, 'Clear')
+    reset_button = Button(reset_button_ax, 'Reset')
     reset_button.on_clicked(reset_callback)
 
     # pause button
@@ -180,14 +246,25 @@ def main():
     exit_button = Button(exit_button_ax, 'Exit', hovercolor="red")
     exit_button.on_clicked(exit_callback)
 
+    # add button
+    add_button_ax = plt.axes([0.30, 0.88, 0.2, 0.05])
+    add_button = Button(add_button_ax, 'Add (+10)', hovercolor="green")
+    add_button.on_clicked(add_callback)
+
+    # remove button
+    remove_button_ax = plt.axes([0.50, 0.88, 0.2, 0.05])
+    remove_button = Button(remove_button_ax, 'Remove (-10)', hovercolor="red")
+    remove_button.on_clicked(remove_callback)
+
     ani = FuncAnimation(
         fig,
-        lambda frame: update(pause_state, exit_state),
+        lambda frame: update(pause_state, exit_state, pending, axes),
         init_func=lambda: init_boids(axes),
-        interval=10,
+        interval=1,
         blit=True,
         cache_frame_data=False
     )
+    ani_state['ani'] = ani
 
     plt.show()
 
