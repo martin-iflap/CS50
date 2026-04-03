@@ -6,15 +6,16 @@ import matplotlib
 
 WIDTH = 225
 HEIGHT = 225
-N = 300 # number of boids
+N = 400 # number of boids
 SPEED = 4.0
-DRIFT_STRENGTH = 0.8
-PERCEPTION_RADIUS = 40 *1.25
-TOO_CLOSE_RADIUS = 15 *1.25
+DRIFT_STRENGTH = 0.9
+PERCEPTION_RADIUS = 25
+TOO_CLOSE_RADIUS = 15
 SMOOTHING = 0.55
+FOV = 240
 
 COH_WEIGHT = 1.0     # 1.0
-DRIFT_WEIGHT = 0.5   # 0.5
+DRIFT_WEIGHT = 0.3   # 0.3
 SEP_WEIGHT = 2.5     # 2.5
 ALIGN_WEIGHT = 1.4   # 1.4
 
@@ -42,8 +43,8 @@ def rebuild_quiver(ax):
         headwidth=3,
         headlength=5,
         headaxislength=3,
-        minlength=0.05,  # minimum rendered length before becoming a dot, in shaft widths
-        minshaft=0.15,  # minimum shaft length, prevents head-only rendering
+        minlength=0.05,
+        minshaft=0.15,
     )
 
     return [quiver]
@@ -117,7 +118,7 @@ def separation(posit, distances):
         neighbor_distances = distances[i][mask[i]]
         if len(neighbors) > 0:
             diff = posit[i] - neighbors
-            weights = (neighbor_distances ** 4)[:, np.newaxis]
+            weights = (neighbor_distances ** 3)[:, np.newaxis]
             steering[i] = np.sum(diff / weights, axis=0)
     return steering
 
@@ -147,9 +148,16 @@ def move_boids(pending: dict, ax):
         velocities = np.delete(velocities, np.arange(actual), axis=0)
         resized = True
 
-    diff = positions[np.newaxis, :, :] - positions[:, np.newaxis, :]
-    distances = np.linalg.norm(diff, axis=2)
-    mask = (distances > 0) & (distances < PERCEPTION_RADIUS)
+    diff = positions[np.newaxis, :, :] - positions[:, np.newaxis, :] # (N, N, 2)
+    distances = np.linalg.norm(diff, axis=2) # (N, N)
+
+    cos_fov = np.cos(np.radians(FOV / 2))
+    vel_normalized = velocities / np.linalg.norm(velocities, axis=1, keepdims=True) # (N, 2)
+    diff_normalized = diff / np.maximum(distances[:, :, np.newaxis], 1e-6) # (N, N, 2)
+    dot_products = np.sum(vel_normalized[:, np.newaxis, :] * diff_normalized, axis=2) # (N, N)
+    fov_mask = dot_products > cos_fov # (N, N)
+
+    mask = (distances > 0) & (distances < PERCEPTION_RADIUS) & fov_mask # (N, N)
 
     drift_velocities = apply_drift(positions, mask)
     cohesion_velocities = cohesion(positions, mask)
@@ -160,9 +168,11 @@ def move_boids(pending: dict, ax):
     magnitudes = np.linalg.norm(final_velocity, axis=1, keepdims=True)
     magnitudes = np.maximum(magnitudes, 1e-5)
     target = (final_velocity / magnitudes) * SPEED
+
     smooth_velocities = velocities + SMOOTHING * (target - velocities)
     magnitudes = np.linalg.norm(smooth_velocities, axis=1, keepdims=True)
     magnitudes = np.maximum(magnitudes, 1e-5)
+
     velocities = (smooth_velocities / magnitudes) * SPEED
 
     positions += velocities
