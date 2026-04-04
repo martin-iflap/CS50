@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib
 
+
+
 WIDTH = 225
 HEIGHT = 225
 N = 400 # number of boids
@@ -15,7 +17,7 @@ SMOOTHING = 0.55
 FOV = 240
 
 COH_WEIGHT = 1.0     # 1.0
-DRIFT_WEIGHT = 0.3   # 0.3
+DRIFT_WEIGHT = 0.9   # 0.3
 SEP_WEIGHT = 2.5     # 2.5
 ALIGN_WEIGHT = 1.4   # 1.4
 
@@ -64,62 +66,79 @@ def init_boids(ax):
 
 def apply_drift(posit, mask):
     """Apply a small random drift to the velocities to simulate natural movement."""
-    len_posit = len(posit)
-    steering = np.zeros((len_posit, 2))
+    has_no_neighbors = (np.sum(mask, axis=1) == 0)
 
-    for i in range(len_posit):
-        neighbors = posit[mask[i]]
-        if len(neighbors) > -1:
-            drift_velocity = np.random.uniform(-1, 1, 2) * DRIFT_STRENGTH
-            magnitude = np.linalg.norm(drift_velocity)
-            steering[i] += drift_velocity / magnitude
-    return steering
+    result = np.zeros_like(posit)
+
+    drift_velocities = np.random.uniform(-1, 1, (len(posit), 2)) * DRIFT_STRENGTH
+    magnitudes = np.linalg.norm(drift_velocities, axis=1, keepdims=True)
+    magnitudes = np.maximum(magnitudes, 1e-6)
+
+    result[has_no_neighbors] = drift_velocities[has_no_neighbors] / magnitudes[has_no_neighbors]
+
+    return result
 
 
 def cohesion(posit, mask):
-    """Calculate the cohesion steering vector for each boid based on its neighbors."""
-    len_posit = len(posit)
-    steering = np.zeros((len_posit, 2))
+    neighbor_count = np.sum(mask, axis=1, keepdims=True)  # (N, 1)
+    has_neighbors = (neighbor_count > 0).flatten()        # (N,) boolean
 
-    for i in range(len_posit):
-        neighbors = posit[mask[i]]
-        if len(neighbors) > 0:
-            center = np.mean(neighbors, axis=0)
-            center_velocity = center - posit[i]
-            magnitude = np.linalg.norm(center_velocity)
-            steering[i] += center_velocity / magnitude
-    return steering
+    neighbor_sum = np.sum(
+        posit[np.newaxis, :, :] * mask[:, :, np.newaxis],
+        axis=1
+    )  # (N, 2)
+
+    center = np.zeros_like(posit)
+    center[has_neighbors] = neighbor_sum[has_neighbors] / neighbor_count[has_neighbors]
+
+    steering = np.zeros_like(posit)
+    steering[has_neighbors] = center[has_neighbors] - posit[has_neighbors]
+
+    magnitudes = np.linalg.norm(steering, axis=1, keepdims=True)
+    magnitudes = np.maximum(magnitudes, 1e-6)
+
+    result = np.zeros_like(posit)
+    result[has_neighbors] = steering[has_neighbors] / magnitudes[has_neighbors]
+
+    return result
 
 
 def alignment(vel, mask):
     """Calculate the alignment velocity for each boid based on the average velocity of its neighbors."""
-    len_vel = len(vel)
-    steering = np.zeros((len_vel, 2))
+    neighbor_count = np.sum(mask, axis=1, keepdims=True) # (N, 1)
+    has_neighbors = (neighbor_count > 0).flatten() # (N,)
 
-    for i in range(len_vel):
-        neighbor_velocities = vel[mask[i]]
-        if len(neighbor_velocities) > 0:
-            bunch = np.mean(neighbor_velocities, axis=0)
-            bunch_velocity = bunch - vel[i]
-            magnitude = np.linalg.norm(bunch_velocity)
-            steering[i] += bunch_velocity / magnitude
-    return steering
+    vel_sum = np.sum(
+        vel[np.newaxis, :, :] * mask[:, :, np.newaxis], # (1, N, 2) * (N, N, 1) = (N, N, 2)
+        axis=1
+    ) # (N, 2)
+
+    avg_vel = np.zeros_like(vel) # (N, 2)
+    avg_vel[has_neighbors] = vel_sum[has_neighbors] / neighbor_count[has_neighbors] # (N, 2)
+
+    steering = np.zeros_like(vel)
+    steering[has_neighbors] = avg_vel[has_neighbors] - vel[has_neighbors]
+
+    magnitudes = np.linalg.norm(steering, axis=1, keepdims=True)
+    magnitudes = np.maximum(magnitudes, 1e-6)
+
+    result = np.zeros_like(vel)
+    result[has_neighbors] = steering[has_neighbors] / magnitudes[has_neighbors]
+
+    return result
 
 
 def separation(posit, distances):
-    """Calculate the separation steering vector for each boid to avoid crowding."""
-    len_posit = len(posit)
-    steering = np.zeros((len_posit, 2))
+    """Calculate the separation velocity for each boid based on the inverse of the distance to its neighbors."""
+    sep_mask = (distances > 0) & (distances < TOO_CLOSE_RADIUS)  # (N, N)
 
-    mask = (distances > 0) & (distances < TOO_CLOSE_RADIUS)
+    diff = posit[:, np.newaxis, :] - posit[np.newaxis, :, :]  # (N, N, 2)
 
-    for i in range(len_posit):
-        neighbors = posit[mask[i]]
-        neighbor_distances = distances[i][mask[i]]
-        if len(neighbors) > 0:
-            diff = posit[i] - neighbors
-            weights = (neighbor_distances ** 3)[:, np.newaxis]
-            steering[i] = np.sum(diff / weights, axis=0)
+    weights = np.where(sep_mask, distances ** 3, 1.0)  # avoid division by zero
+    weighted_diff = diff / weights[:, :, np.newaxis]   # (N, N, 2)
+    weighted_diff *= sep_mask[:, :, np.newaxis]        # zero out non-neighbors
+
+    steering = np.sum(weighted_diff, axis=1)           # (N, 2)
     return steering
 
 
