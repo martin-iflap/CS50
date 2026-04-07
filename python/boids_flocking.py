@@ -1,15 +1,15 @@
 from matplotlib.animation import FuncAnimation
 from matplotlib.widgets import Button
+from numpy.typing import NDArray
 import matplotlib.pyplot as plt
+from typing import Tuple
 import numpy as np
 import matplotlib
 
-
-
 WIDTH = 225
 HEIGHT = 225
-N = 400 # number of boids
-P = 2 # number of predators
+N = 400  # number of boids
+P = 2  # number of predators
 SPEED = 4.0
 DRIFT_STRENGTH = 0.9
 PERCEPTION_RADIUS = 25
@@ -18,26 +18,27 @@ FEAR_RADIUS = 25
 SMOOTHING = 0.55
 FOV = 240
 
-COH_WEIGHT = 1.0     # 1.0
-DRIFT_WEIGHT = 0.9   # 0.9
-SEP_WEIGHT = 2.5     # 2.5
-ALIGN_WEIGHT = 1.4   # 1.4
+COH_WEIGHT = 1.0
+DRIFT_WEIGHT = 0.9
+SEP_WEIGHT = 2.5
+ALIGN_WEIGHT = 1.4
 FLEE_WEIGHT = 41000
 
-positions = None
-velocities = None
-predator_positions = None
-predator_velocities = None
-quiver_boids = None
+positions: NDArray = None
+velocities: NDArray = None
+predator_positions: NDArray = None
+predator_velocities: NDArray = None
+quiver_boids = None # quivers are matplotlib objects
 quiver_predators = None
-predator_state = {'active': True}
+predator_state: dict = {'active': True}
+
+matplotlib.use('TkAgg')  # open a matplotlib window in Pycharm
 
 
-matplotlib.use('TkAgg') # open a matplotlib window in Pycharm
-
-
-def rebuild_quiver(ax):
-    """Rebuild the quiver"""
+def rebuild_quiver(ax) -> list:
+    """Rebuild the quiver for boids and also call the rebuild_quiver_predators if predators are active
+    RETURN: list of quiver objects to be redrawn (boids, predators)
+    """
     global positions, velocities, quiver_boids
 
     if quiver_boids is not None:
@@ -66,7 +67,7 @@ def rebuild_quiver(ax):
 
 
 def rebuild_quiver_predators(ax):
-    """Rebuild the quiver for predators"""
+    """Rebuild the quiver for predators and return the quiver object"""
     global predator_positions, predator_velocities, quiver_predators
 
     if quiver_predators is not None:
@@ -88,8 +89,10 @@ def rebuild_quiver_predators(ax):
     return quiver_predators
 
 
-def init_predators(ax):
-    """Initialize the predators objects"""
+def init_predators(ax) -> None:
+    """Initialize the predators
+     - compute random positions and velocities and normalize the speed
+    """
     global predator_positions, predator_velocities, quiver_predators
 
     predator_positions = np.random.uniform(0, [WIDTH, HEIGHT], (P, 2))
@@ -98,23 +101,31 @@ def init_predators(ax):
     predator_velocities = (predator_velocities / p_magnitudes) * SPEED
 
 
-def init_boids(ax):
-    """Initialize the boids objects"""
+def init_boids(ax) -> list:
+    """Initialize the boids
+     - compute random positions and velocities and normalize the speed
+     - if predators are active, call the init_predators
+     - RETURN: the rebuild quiver objects to be redrawn
+    """
     global positions, velocities, quiver_boids
 
     positions = np.random.uniform(0, [WIDTH, HEIGHT], (N, 2))
     velocities = np.random.uniform(-1, 1, (N, 2))
     magnitudes = np.linalg.norm(velocities, axis=1, keepdims=True)
     velocities = (velocities / magnitudes) * SPEED
-    
+
     if predator_state['active']:
         init_predators(ax)
 
     return rebuild_quiver(ax)
 
 
-def apply_drift(posit, mask):
-    """Apply a small random drift to the velocities to simulate natural movement."""
+def apply_drift(posit: NDArray, mask: NDArray) -> NDArray:
+    """Apply a small random drift to the velocities to simulate natural movement.
+     - calculate random velocities and multiply by DRIFT_STRENGTH
+     - filter out the boids that do have neighbors and normalize the steering vectors
+     RETURN: adjusted velocity vectors (N, 2)
+    """
     has_no_neighbors = (np.sum(mask, axis=1) == 0)
 
     result = np.zeros_like(posit)
@@ -128,9 +139,15 @@ def apply_drift(posit, mask):
     return result
 
 
-def cohesion(posit, mask):
+def cohesion(posit: NDArray, mask: NDArray) -> NDArray:
+    """Calculate the cohesion for all the boids
+     - compute the neighbor count and the sum of the neighbor positions for each boid
+     - calculate the center of neighbors and the vector towards it
+     - filter out the boids that do not have neighbors and normalize the steering vectors
+     RETURN: adjusted velocity vectors (N, 2)
+    """
     neighbor_count = np.sum(mask, axis=1, keepdims=True)  # (N, 1)
-    has_neighbors = (neighbor_count > 0).flatten()        # (N,) boolean
+    has_neighbors = (neighbor_count > 0).flatten()  # (N,) boolean
 
     neighbor_sum = np.sum(
         posit[np.newaxis, :, :] * mask[:, :, np.newaxis],
@@ -152,18 +169,23 @@ def cohesion(posit, mask):
     return result
 
 
-def alignment(vel, mask):
-    """Calculate the alignment velocity for each boid based on the average velocity of its neighbors."""
-    neighbor_count = np.sum(mask, axis=1, keepdims=True) # (N, 1)
-    has_neighbors = (neighbor_count > 0).flatten() # (N,)
+def alignment(vel: NDArray, mask: NDArray) -> NDArray:
+    """Calculate the alignment velocity for each boid based on the average velocity of its neighbors.
+     - compute the neighbor cound and the sum of neighbor velocity vectors for each boid
+     - calculate the average velocity of neighbors and adjust the current velocity towards it
+     - filter out boids with no neighbors and normalize the steering vectors
+     RETURN: adjusted velocity vectors (N, 2)
+    """
+    neighbor_count = np.sum(mask, axis=1, keepdims=True)  # (N, 1)
+    has_neighbors = (neighbor_count > 0).flatten()  # (N,)
 
     vel_sum = np.sum(
-        vel[np.newaxis, :, :] * mask[:, :, np.newaxis], # (1, N, 2) * (N, N, 1) = (N, N, 2)
+        vel[np.newaxis, :, :] * mask[:, :, np.newaxis],  # (1, N, 2) * (N, N, 1) = (N, N, 2)
         axis=1
-    ) # (N, 2)
+    )  # (N, 2)
 
-    avg_vel = np.zeros_like(vel) # (N, 2)
-    avg_vel[has_neighbors] = vel_sum[has_neighbors] / neighbor_count[has_neighbors] # (N, 2)
+    avg_vel = np.zeros_like(vel)  # (N, 2)
+    avg_vel[has_neighbors] = vel_sum[has_neighbors] / neighbor_count[has_neighbors]  # (N, 2)
 
     steering = np.zeros_like(vel)
     steering[has_neighbors] = avg_vel[has_neighbors] - vel[has_neighbors]
@@ -177,59 +199,81 @@ def alignment(vel, mask):
     return result
 
 
-def separation(posit, distances, diff):
-    """Calculate the separation velocity for each boid based on the inverse of the distance to its neighbors."""
+def separation(posit: NDArray, distances: NDArray, diff: NDArray) -> NDArray:
+    """Calculate the separation velocity for each boid based on the inverse of the distance to its neighbors.
+     - create a separation mask and compute the weighted difference vectors based on the inverse of the distance to neighbors
+     - zero out the non-neighbors and sum the weighted differences to get the steering vector for separation
+     RETURN: adjusted velocity vectors (N, 2)
+    """
     sep_mask = (distances > 0) & (distances < TOO_CLOSE_RADIUS)  # (N, N)
 
-    diff = -diff # (N, N, 2)
+    diff = -diff  # (N, N, 2)
 
     weights = np.where(sep_mask, distances ** 3, 1.0)  # avoid division by zero
-    weighted_diff = diff / weights[:, :, np.newaxis]   # (N, N, 2)
-    weighted_diff *= sep_mask[:, :, np.newaxis]        # zero out non-neighbors
+    weighted_diff = diff / weights[:, :, np.newaxis]  # (N, N, 2)
+    weighted_diff *= sep_mask[:, :, np.newaxis]  # zero out non-neighbors
 
-    steering = np.sum(weighted_diff, axis=1)           # (N, 2)
-
-    return steering
-
-
-def flee(posit, pr_posit):
-    """Compute the steering vectors for boids to avoid predators based on the inverse of the distance to the predators."""
-    diff_to_predator = posit[:, np.newaxis, :] - pr_posit[np.newaxis, :, :] # (N, P, 2)
-    dist_to_predator = np.linalg.norm(diff_to_predator, axis=2, keepdims=True) # (N, P, 1)
-
-    fear_mask = (dist_to_predator > 0) & (dist_to_predator < FEAR_RADIUS) # (N, P, 1)
-
-    weights = np.where(fear_mask, dist_to_predator ** 3, 1.0) # (N, P, 1)
-    weighted_diff = (diff_to_predator / weights) * fear_mask # (N, P, 2) / (N, P, 1) = (N, P, 2)
-
-    steering = np.sum(weighted_diff, axis=1) # (N, 2)
+    steering = np.sum(weighted_diff, axis=1)  # (N, 2)
 
     return steering
 
 
-def move_predators(posit, pr_posit, pr_vel):
-    """Move predators to chase the nearest boid."""
+def flee(posit: NDArray, pr_posit: NDArray) -> Tuple[NDArray, NDArray, NDArray]:
+    """Compute the steering vectors for boids to avoid predators based on the inverse of the distance to the predators.
+     - compute the differences and distances to predators
+     - also create the fear_mask, in_danger mask and min_dist use the latter 2 to calculate speed boosts in move_boids
+     - calculate the weighted difference vectors based on the inverse of the distance
+       to predators and sum them to get the steering vector for fleeing
+     RETURN: adjusted velocity vectors (N, 2), in_danger mask (N,), and min_dist to nearest predator (N,).
+    """
+    diff_to_predator = posit[:, np.newaxis, :] - pr_posit[np.newaxis, :, :]  # (N, P, 2)
+    diff_to_predator -= np.round(diff_to_predator / [WIDTH, HEIGHT]) * [WIDTH, HEIGHT]
+    dist_to_predator = np.linalg.norm(diff_to_predator, axis=2, keepdims=True)  # (N, P, 1)
+
+    fear_mask = (dist_to_predator > 0) & (dist_to_predator < FEAR_RADIUS)  # (N, P, 1)
+    in_danger = np.any(fear_mask[:, :, 0], axis=1)  # (N,) boolean
+
+    min_dist = np.min(np.where(fear_mask[:, :, 0], dist_to_predator[:, :, 0], FEAR_RADIUS), axis=1)
+
+    weights = np.where(fear_mask, dist_to_predator ** 3, 1.0)  # (N, P, 1)
+    weighted_diff = (diff_to_predator / weights) * fear_mask  # (N, P, 2) / (N, P, 1) = (N, P, 2)
+
+    steering = np.sum(weighted_diff, axis=1)  # (N, 2)
+
+    return steering, in_danger, min_dist
+
+
+def move_predators(posit: NDArray, pr_posit: NDArray, pr_vel: NDArray) -> Tuple[NDArray, NDArray]:
+    """Move predators to chase the nearest boid.
+     - compute the steering vectors to follow prey based on inverse of the distance to the boids
+     - also compute the steering vectors to avoid collisions with other predators based on the inverse of the distance to other predators
+     - combine the steering vectors with the current velocity to get the target velocity and apply smoothing for better visuals
+     - normalize the velocity vectors at the end to SPEED - 0.2
+     RETURN: predator positions and velocity arrays (N, 2).
+    """
     # compute the steering to follow the prey
     diff_to_boids = posit[np.newaxis, :, :] - pr_posit[:, np.newaxis, :]  # (P, N, 2)
+    diff_to_boids -= np.round(diff_to_boids / [WIDTH, HEIGHT]) * [WIDTH, HEIGHT]
     dist_to_boids = np.linalg.norm(diff_to_boids, axis=2, keepdims=True)  # (P, N, 1)
 
-    weights = dist_to_boids ** 5 # (P, N, 1)
-    weighted_diff = diff_to_boids / weights # (P, N, 2)
+    weights = dist_to_boids ** 5  # (P, N, 1)
+    weighted_diff = diff_to_boids / weights  # (P, N, 2)
 
-    steering = np.sum(weighted_diff, axis=1) # (P, 2)
+    steering = np.sum(weighted_diff, axis=1)  # (P, 2)
     mag = np.linalg.norm(steering, axis=1, keepdims=True)
     mag = np.maximum(mag, 1e-6)
     steering = (steering / mag) * (SPEED - 0.2)
 
     # compute the steering to avoid collisions with other predators
-    diff_pred_to_pred = pr_posit[:, np.newaxis, :] - pr_posit[np.newaxis, :, :] # (P, 1, 2) - (P, 1, 2) = (P, P, 2)
-    dist_pred_to_pred = np.linalg.norm(diff_pred_to_pred, axis=2) # (P, P)
-    collision_mask = (dist_pred_to_pred > 0) & (dist_pred_to_pred < (TOO_CLOSE_RADIUS + 30)) # (P, P)
+    diff_pred_to_pred = pr_posit[:, np.newaxis, :] - pr_posit[np.newaxis, :, :]  # (P, 1, 2) - (P, 1, 2) = (P, P, 2)
+    dist_pred_to_pred = np.linalg.norm(diff_pred_to_pred, axis=2)  # (P, P)
+    collision_mask = (dist_pred_to_pred > 0) & (dist_pred_to_pred < (TOO_CLOSE_RADIUS + 30))  # (P, P)
 
-    collision_weights = np.where(collision_mask, dist_pred_to_pred ** 3, 1.0) # (P, P)
-    weighted_diff_ptp = (diff_pred_to_pred / collision_weights[:, :, np.newaxis]) * collision_mask[:, :, np.newaxis] # (P, P, 2)
+    collision_weights = np.where(collision_mask, dist_pred_to_pred ** 3, 1.0)  # (P, P)
+    weighted_diff_ptp = (diff_pred_to_pred / collision_weights[:, :, np.newaxis]) * collision_mask[
+        :, :, np.newaxis]  # (P, P, 2)
 
-    collision_steering = np.sum(weighted_diff_ptp, axis=1) # (P, 2)
+    collision_steering = np.sum(weighted_diff_ptp, axis=1)  # (P, 2)
 
     # compute final velocity
     target = 1.0 * pr_vel + 1.0 * steering + 30 * collision_steering
@@ -249,8 +293,19 @@ def move_predators(posit, pr_posit, pr_vel):
     return pr_posit, pr_vel
 
 
-def move_boids(pending: dict, ax):
-    """Move the boids according to the rules of alignment, cohesion, and separation."""
+def move_boids(pending: dict, ax) -> list:
+    """Move the boids according to the rules of alignment, cohesion, and separation.
+     - Check if there are pending additions or removals of boids and update the positions and velocities arrays accordingly.
+     - Compute the difference and distance between all pairs of boids.
+     - Calculate the mask for neighbors based on the perception radius and field of view.
+     - Calculate the velocity adjustments for each rule and combine them with the current velocity to get the target velocity.
+     - Apply smoothing to the velocity changes for better visuals and normalize the final velocity to SPEED.
+     - If predators are active, also calculate the flee velocities and apply a speed boost for endangered boids based on their distance to the nearest predator.
+     - Update the positions of the boids and wrap around the edges of the screen.
+     - If predators are active, also move the predators using the move_predators function.
+     - Update the quiver positions for the boids and predators if active.
+     RETURN: the quiver arrays to be redrawn
+    """
     global positions, velocities, predator_positions, predator_velocities, quiver_boids, quiver_predators
 
     resized = False
@@ -275,26 +330,31 @@ def move_boids(pending: dict, ax):
         resized = True
 
     # compute the difference and distance between all pairs of boids
-    diff = positions[np.newaxis, :, :] - positions[:, np.newaxis, :] # (N, N, 2)
-    distances = np.linalg.norm(diff, axis=2) # (N, N)
+    diff = positions[np.newaxis, :, :] - positions[:, np.newaxis, :]  # (N, N, 2)
+    diff -= np.round(diff / [WIDTH, HEIGHT]) * [WIDTH, HEIGHT]
+    distances = np.linalg.norm(diff, axis=2)  # (N, N)
 
     # calculate the mask based off of the FOV
     cos_fov = np.cos(np.radians(FOV / 2))
-    vel_normalized = velocities / np.linalg.norm(velocities, axis=1, keepdims=True) # (N, 2)
-    diff_normalized = diff / np.maximum(distances[:, :, np.newaxis], 1e-6) # (N, N, 2)
-    dot_products = np.sum(vel_normalized[:, np.newaxis, :] * diff_normalized, axis=2) # (N, N)
-    fov_mask = dot_products > cos_fov # (N, N)
+    vel_normalized = velocities / np.linalg.norm(velocities, axis=1, keepdims=True)  # (N, 2)
+    diff_normalized = diff / np.maximum(distances[:, :, np.newaxis], 1e-6)  # (N, N, 2)
+    dot_products = np.sum(vel_normalized[:, np.newaxis, :] * diff_normalized, axis=2)  # (N, N)
+    fov_mask = dot_products > cos_fov  # (N, N)
 
-    mask = (distances > 0) & (distances < PERCEPTION_RADIUS) & fov_mask # (N, N)
+    mask = (distances > 0) & (distances < PERCEPTION_RADIUS) & fov_mask  # (N, N)
 
     # calculate velocities for all boids based on the rules
     drift_velocities = apply_drift(positions, mask)
     cohesion_velocities = cohesion(positions, mask)
     alignment_velocities = alignment(velocities, mask)
     separation_velocities = separation(positions, distances, diff)
-    flee_velocities = (flee(positions, predator_positions)
-                       if predator_state['active'] and predator_positions is not None
-                       else np.zeros_like(positions))
+
+    if predator_state['active'] and predator_positions is not None:
+        flee_velocities, in_danger, min_dist = flee(positions, predator_positions)
+    else:
+        flee_velocities = np.zeros_like(positions)
+        in_danger = np.zeros(len(positions), dtype=bool)
+        min_dist = np.full(len(positions), FEAR_RADIUS)
 
     # compute and normalize the final velocity
     final_velocity = (velocities
@@ -314,6 +374,10 @@ def move_boids(pending: dict, ax):
     magnitudes = np.maximum(magnitudes, 1e-5)
 
     velocities = (smooth_velocities / magnitudes) * SPEED
+
+    # apply speed up for endangered boids
+    boost_factor = 1.0 + 0.6 * (1.0 - min_dist / FEAR_RADIUS) * in_danger
+    velocities = velocities * boost_factor[:, np.newaxis]
 
     positions += velocities
     positions = np.mod(positions, [WIDTH, HEIGHT])
@@ -338,8 +402,10 @@ def move_boids(pending: dict, ax):
         return quivers
 
 
-def update(pause_state: dict, exit_state: dict, pending: dict, ax):
-    """Main function to update the animation"""
+def update(pause_state: dict, exit_state: dict, pending: dict, ax) -> list:
+    """Update function for the animation. This function is called by FuncAnimation.
+     - check for exit state and exit if True
+    """
     global quiver_boids, quiver_predators
 
     if exit_state['exit']:
@@ -352,8 +418,15 @@ def update(pause_state: dict, exit_state: dict, pending: dict, ax):
     return move_boids(pending, ax)
 
 
-def main():
-    """The main function to run the simulation"""
+def main() -> None:
+    """The main function to run the simulation and construct the FuncAnimation
+     - create the plot and set up the buttons for pause, reset, exit, add/remove boids and toggle predators
+     - the button callbacks will update the respective states and call the necessary functions to update the simulation
+     - start the animation with FuncAnimation and show the plot
+     - the animation will call the update function at each frame, which will move the boids and update the quiver positions accordingly
+     - the simulation can be paused, reset, or exited using the buttons, and boids can be added or removed dynamically
+     - the predators can also be toggled on or off
+    """
     fig, axes = plt.subplots(1, 1, figsize=(8, 8))
 
     axes.set_xlim(0, WIDTH)
