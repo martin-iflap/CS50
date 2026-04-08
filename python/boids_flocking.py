@@ -6,6 +6,7 @@ from typing import Tuple
 import numpy as np
 import matplotlib
 
+
 WIDTH = 225
 HEIGHT = 225
 N = 400  # number of boids
@@ -23,6 +24,7 @@ DRIFT_WEIGHT = 0.9
 SEP_WEIGHT = 2.5
 ALIGN_WEIGHT = 1.4
 FLEE_WEIGHT = 41000
+AVOID_W_WEIGHT = 2000
 
 positions: NDArray = None
 velocities: NDArray = None
@@ -31,6 +33,7 @@ predator_velocities: NDArray = None
 quiver_boids = None # quivers are matplotlib objects
 quiver_predators = None
 predator_state: dict = {'active': True}
+avoid_walls: dict = {'active': False}
 
 matplotlib.use('TkAgg')  # open a matplotlib window in Pycharm
 
@@ -218,6 +221,34 @@ def separation(posit: NDArray, distances: NDArray, diff: NDArray) -> NDArray:
     return steering
 
 
+def steer_from_walls(posit: NDArray) -> NDArray:
+    """Compute correction vectors for the boids to avoid walls"""
+    diff_to_walls = np.zeros_like(posit)
+    wall_radius = 5
+
+    # left wall
+    dist_left = posit[:, 0]  # (N, 1)
+    mask_left = dist_left < wall_radius
+    diff_to_walls[mask_left, 0] += (wall_radius - dist_left[mask_left]) ** 2
+
+    # right wall
+    dist_right = WIDTH - posit[:, 0]  # (N, 1)
+    mask_right = dist_right < wall_radius
+    diff_to_walls[mask_right, 0] -= (wall_radius - dist_right[mask_right]) ** 2
+
+    # top wall
+    dist_top = HEIGHT - posit[:, 1]  # (N, 1)
+    mask_top = dist_top < wall_radius
+    diff_to_walls[mask_top, 1] -= (wall_radius - dist_top[mask_top]) ** 2
+
+    # bottom wall
+    dist_bottom = posit[:, 1]  # (N, 1)
+    mask_bottom = dist_bottom < wall_radius
+    diff_to_walls[mask_bottom, 1] += (wall_radius - dist_bottom[mask_bottom]) ** 2
+
+    return diff_to_walls
+
+
 def flee(posit: NDArray, pr_posit: NDArray) -> Tuple[NDArray, NDArray, NDArray]:
     """Compute the steering vectors for boids to avoid predators based on the inverse of the distance to the predators.
      - compute the differences and distances to predators
@@ -227,7 +258,8 @@ def flee(posit: NDArray, pr_posit: NDArray) -> Tuple[NDArray, NDArray, NDArray]:
      RETURN: adjusted velocity vectors (N, 2), in_danger mask (N,), and min_dist to nearest predator (N,).
     """
     diff_to_predator = posit[:, np.newaxis, :] - pr_posit[np.newaxis, :, :]  # (N, P, 2)
-    diff_to_predator -= np.round(diff_to_predator / [WIDTH, HEIGHT]) * [WIDTH, HEIGHT]
+    if not avoid_walls['active']:
+        diff_to_predator -= np.round(diff_to_predator / [WIDTH, HEIGHT]) * [WIDTH, HEIGHT]
     dist_to_predator = np.linalg.norm(diff_to_predator, axis=2, keepdims=True)  # (N, P, 1)
 
     fear_mask = (dist_to_predator > 0) & (dist_to_predator < FEAR_RADIUS)  # (N, P, 1)
@@ -253,7 +285,8 @@ def move_predators(posit: NDArray, pr_posit: NDArray, pr_vel: NDArray) -> Tuple[
     """
     # compute the steering to follow the prey
     diff_to_boids = posit[np.newaxis, :, :] - pr_posit[:, np.newaxis, :]  # (P, N, 2)
-    diff_to_boids -= np.round(diff_to_boids / [WIDTH, HEIGHT]) * [WIDTH, HEIGHT]
+    if not avoid_walls['active']:
+        diff_to_boids -= np.round(diff_to_boids / [WIDTH, HEIGHT]) * [WIDTH, HEIGHT]
     dist_to_boids = np.linalg.norm(diff_to_boids, axis=2, keepdims=True)  # (P, N, 1)
 
     weights = dist_to_boids ** 5  # (P, N, 1)
@@ -288,7 +321,8 @@ def move_predators(posit: NDArray, pr_posit: NDArray, pr_vel: NDArray) -> Tuple[
 
     # Update predator positions and velocities
     pr_posit += pr_vel
-    pr_posit = np.mod(pr_posit, [WIDTH, HEIGHT])
+    if not avoid_walls['active']:
+        pr_posit = np.mod(pr_posit, [WIDTH, HEIGHT])
 
     return pr_posit, pr_vel
 
@@ -331,7 +365,8 @@ def move_boids(pending: dict, ax) -> list:
 
     # compute the difference and distance between all pairs of boids
     diff = positions[np.newaxis, :, :] - positions[:, np.newaxis, :]  # (N, N, 2)
-    diff -= np.round(diff / [WIDTH, HEIGHT]) * [WIDTH, HEIGHT]
+    if not avoid_walls['active']:
+        diff -= np.round(diff / [WIDTH, HEIGHT]) * [WIDTH, HEIGHT]
     distances = np.linalg.norm(diff, axis=2)  # (N, N)
 
     # calculate the mask based off of the FOV
@@ -349,6 +384,11 @@ def move_boids(pending: dict, ax) -> list:
     alignment_velocities = alignment(velocities, mask)
     separation_velocities = separation(positions, distances, diff)
 
+    if avoid_walls['active']:
+        avoid_w_velocities = steer_from_walls(positions)
+    else:
+        avoid_w_velocities = np.zeros_like(positions)
+
     if predator_state['active'] and predator_positions is not None:
         flee_velocities, in_danger, min_dist = flee(positions, predator_positions)
     else:
@@ -363,6 +403,7 @@ def move_boids(pending: dict, ax) -> list:
                       + ALIGN_WEIGHT * alignment_velocities
                       + SEP_WEIGHT * separation_velocities
                       + FLEE_WEIGHT * flee_velocities
+                      + AVOID_W_WEIGHT * avoid_w_velocities
                       )
     magnitudes = np.linalg.norm(final_velocity, axis=1, keepdims=True)
     magnitudes = np.maximum(magnitudes, 1e-5)
@@ -380,7 +421,8 @@ def move_boids(pending: dict, ax) -> list:
     velocities = velocities * boost_factor[:, np.newaxis]
 
     positions += velocities
-    positions = np.mod(positions, [WIDTH, HEIGHT])
+    if not avoid_walls['active']:
+        positions = np.mod(positions, [WIDTH, HEIGHT])
 
     # Move predators
     if predator_state['active']:
@@ -488,6 +530,24 @@ def main() -> None:
             predator_velocities = None
         fig.canvas.draw()
 
+    def walls_callback(event):
+        """Enable and disable the walls"""
+        global SPEED
+        avoid_walls['active'] = not avoid_walls['active']
+
+        if avoid_walls['active']:
+            walls_button.label.set_text('Walls: ON')
+            global positions, predator_positions
+            positions = np.mod(positions, [WIDTH, HEIGHT])
+            if predator_positions is not None:
+                predator_positions = np.mod(predator_positions, [WIDTH, HEIGHT])
+            SPEED -= 2
+        else:
+            walls_button.label.set_text('Walls: OFF')
+            SPEED += 2
+
+        fig.canvas.draw()
+
     # reset button
     reset_button_ax = plt.axes([0.32, 0.02, 0.08, 0.04])
     reset_button = Button(reset_button_ax, 'Reset')
@@ -504,18 +564,25 @@ def main() -> None:
     exit_button.on_clicked(exit_callback)
 
     # add button
-    add_button_ax = plt.axes([0.20, 0.88, 0.2, 0.05])
+    add_button_ax = plt.axes([0.20, 0.88, 0.15, 0.05])
     add_button = Button(add_button_ax, 'Add (+10)', hovercolor="green")
     add_button.on_clicked(add_callback)
 
     # remove button
-    remove_button_ax = plt.axes([0.40, 0.88, 0.2, 0.05])
+    remove_button_ax = plt.axes([0.35, 0.88, 0.15, 0.05])
     remove_button = Button(remove_button_ax, 'Remove (-10)', hovercolor="red")
     remove_button.on_clicked(remove_callback)
 
-    predators_button_ax = plt.axes([0.60, 0.88, 0.2, 0.05])
+    # predators button
+    predators_button_ax = plt.axes([0.50, 0.88, 0.15, 0.05])
     predators_button = Button(predators_button_ax, 'Predators: ON', hovercolor="orange")
     predators_button.on_clicked(predators_callback)
+
+    # walls button
+    walls_button_ax = plt.axes([0.65, 0.88, 0.15, 0.05])
+    walls_button = Button(walls_button_ax, 'Walls: OFF', hovercolor="yellow")
+    walls_button.on_clicked(walls_callback)
+
 
     ani = FuncAnimation(
         fig,
