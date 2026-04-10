@@ -24,7 +24,7 @@ DRIFT_WEIGHT = 0.9
 SEP_WEIGHT = 2.5
 ALIGN_WEIGHT = 1.4
 FLEE_WEIGHT = 41000
-AVOID_W_WEIGHT = 2000
+AVOID_W_WEIGHT = 0.0025 # 0.0025 without predators 0.005 with predators
 
 positions: NDArray = None
 velocities: NDArray = None
@@ -222,9 +222,17 @@ def separation(posit: NDArray, distances: NDArray, diff: NDArray) -> NDArray:
 
 
 def steer_from_walls(posit: NDArray) -> NDArray:
-    """Compute correction vectors for the boids to avoid walls"""
+    """Compute correction vectors for the boids to avoid walls
+     - compute the distances from all 4 walls and combine to compute the final steering vector
+     - wall_radius sets the radius at which the boids start turning away from the wall
+     - Computation: 1. compute the distance from a wall for each boid
+                    2. create a mask for boids within the wall_radius
+                    3. calculate the steering vector to push the boids away from the wall based on how close they are
+     ARGS: posit: (N, 2) array of boid positions
+     RETURN: adjusted velocity vectors (N, 2)
+    """
     diff_to_walls = np.zeros_like(posit)
-    wall_radius = 5
+    wall_radius = 40
 
     # left wall
     dist_left = posit[:, 0]  # (N, 1)
@@ -279,6 +287,7 @@ def move_predators(posit: NDArray, pr_posit: NDArray, pr_vel: NDArray) -> Tuple[
     """Move predators to chase the nearest boid.
      - compute the steering vectors to follow prey based on inverse of the distance to the boids
      - also compute the steering vectors to avoid collisions with other predators based on the inverse of the distance to other predators
+     - if walls are active compute the wall avoidance vectors with steer_from_walls function to prevent collisions
      - combine the steering vectors with the current velocity to get the target velocity and apply smoothing for better visuals
      - normalize the velocity vectors at the end to SPEED - 0.2
      RETURN: predator positions and velocity arrays (N, 2).
@@ -308,8 +317,13 @@ def move_predators(posit: NDArray, pr_posit: NDArray, pr_vel: NDArray) -> Tuple[
 
     collision_steering = np.sum(weighted_diff_ptp, axis=1)  # (P, 2)
 
+    # compute the steering to avoid collisions with walls
+    walls_steering = np.zeros_like(predator_positions)
+    if avoid_walls['active']:
+        walls_steering = steer_from_walls(predator_positions)
+
     # compute final velocity
-    target = 1.0 * pr_vel + 1.0 * steering + 30 * collision_steering
+    target = 1.0 * pr_vel + 1.0 * steering + 30 * collision_steering + AVOID_W_WEIGHT * walls_steering
 
     magnitudes = np.linalg.norm(target, axis=1, keepdims=True)
     magnitudes = np.maximum(magnitudes, 1e-6)
@@ -323,6 +337,8 @@ def move_predators(posit: NDArray, pr_posit: NDArray, pr_vel: NDArray) -> Tuple[
     pr_posit += pr_vel
     if not avoid_walls['active']:
         pr_posit = np.mod(pr_posit, [WIDTH, HEIGHT])
+    else:
+        pr_posit = np.clip(pr_posit, [0, 0], [WIDTH, HEIGHT])
 
     return pr_posit, pr_vel
 
@@ -337,6 +353,7 @@ def move_boids(pending: dict, ax) -> list:
      - If predators are active, also calculate the flee velocities and apply a speed boost for endangered boids based on their distance to the nearest predator.
      - Update the positions of the boids and wrap around the edges of the screen.
      - If predators are active, also move the predators using the move_predators function.
+     - If walls are active call the steer_from_walls function to get the wall avoidance velocities and include them in the final velocity calculation.
      - Update the quiver positions for the boids and predators if active.
      RETURN: the quiver arrays to be redrawn
     """
@@ -423,6 +440,8 @@ def move_boids(pending: dict, ax) -> list:
     positions += velocities
     if not avoid_walls['active']:
         positions = np.mod(positions, [WIDTH, HEIGHT])
+    else:
+        positions = np.clip(positions, [0, 0], [WIDTH, HEIGHT])
 
     # Move predators
     if predator_state['active']:
@@ -462,12 +481,12 @@ def update(pause_state: dict, exit_state: dict, pending: dict, ax) -> list:
 
 def main() -> None:
     """The main function to run the simulation and construct the FuncAnimation
-     - create the plot and set up the buttons for pause, reset, exit, add/remove boids and toggle predators
+     - create the plot and set up the buttons for pause, reset, exit, add/remove boids and toggle predators and walls
      - the button callbacks will update the respective states and call the necessary functions to update the simulation
      - start the animation with FuncAnimation and show the plot
      - the animation will call the update function at each frame, which will move the boids and update the quiver positions accordingly
      - the simulation can be paused, reset, or exited using the buttons, and boids can be added or removed dynamically
-     - the predators can also be toggled on or off
+     - the predators and walls can also be toggled on or off
     """
     fig, axes = plt.subplots(1, 1, figsize=(8, 8))
 
@@ -513,14 +532,18 @@ def main() -> None:
         pending['remove'] += num
 
     def predators_callback(event):
-        """Enable or disable the predators"""
-        global predator_positions, predator_velocities, quiver_predators
+        """Enable or disable the predators
+         - adjust the AVOID_W_WEIGHT based on the predator_state to work with walls nicely
+        """
+        global predator_positions, predator_velocities, quiver_predators, AVOID_W_WEIGHT
 
         predator_state['active'] = not predator_state['active']
         if predator_state['active']:
             predators_button.label.set_text('Predators: ON')
             init_predators(axes)
             rebuild_quiver_predators(axes)
+            if avoid_walls['active']:
+                AVOID_W_WEIGHT = 0.005
         else:
             predators_button.label.set_text('Predators: OFF')
             if quiver_predators is not None:
@@ -528,11 +551,16 @@ def main() -> None:
                 quiver_predators = None
             predator_positions = None
             predator_velocities = None
+            if avoid_walls['active']:
+                AVOID_W_WEIGHT = 0.0025
         fig.canvas.draw()
 
     def walls_callback(event):
-        """Enable and disable the walls"""
-        global SPEED
+        """Enable and disable the walls
+         - when walls and predators are active increase the AVOID_W_WEIGHT
+         - allways decrease SPEED when walls are active for better visuals
+        """
+        global SPEED, AVOID_W_WEIGHT
         avoid_walls['active'] = not avoid_walls['active']
 
         if avoid_walls['active']:
@@ -541,10 +569,14 @@ def main() -> None:
             positions = np.mod(positions, [WIDTH, HEIGHT])
             if predator_positions is not None:
                 predator_positions = np.mod(predator_positions, [WIDTH, HEIGHT])
-            SPEED -= 2
+                AVOID_W_WEIGHT = 0.005
+            else:
+                AVOID_W_WEIGHT = 0.0025
+
+            SPEED = 3
         else:
             walls_button.label.set_text('Walls: OFF')
-            SPEED += 2
+            SPEED = 4
 
         fig.canvas.draw()
 
