@@ -1,23 +1,27 @@
 #include <stdio.h>
 
-void split_n(long n, int first[], int *first_len, int second[], int *second_len);
+void split_n(long long n, int first[], int *first_len, int second[], int *second_len);
 void check_n(int starting_d, int length, const int first[], int first_len, const int second[], int second_len);
-int get_starting(long n, int *length);
+int get_starting(long long n, int *length);
 
 int main(void)
 {
     int length = 0;
-    int first[15];
-    int second[15];
+    int first[20]; 
+    int second[20];
     int f_len = 0;
     int s_len = 0;
 
-    long n;
-    do
+    long long n;
+    while (1)
     {
         printf("Number: ");
+
+        if (scanf("%lld", &n) == 1 && n >= 0)
+            break;
+
+        while (getchar() != '\n');
     }
-    while (scanf("%ld", &n) != 1 || n < 0);
 
     int starting_d = get_starting(n, &length);
 
@@ -25,7 +29,7 @@ int main(void)
     check_n(starting_d, length, first, f_len, second, s_len);
 }
 
-void split_n(long n, int first[], int *first_len, int second[], int *second_len)
+void split_n(long long n, int first[], int *first_len, int second[], int *second_len)
 {
     int i1 = 0;
     int i2 = 0;
@@ -65,9 +69,12 @@ void check_n(int starting_d, int length, const int first[], int first_len, const
             sum += digit;
         }
     }
+    
     if(sum % 10 == 0)
     {
-        if((starting_d / 10 == 4) && (length == 13 || length == 16))
+        int visa_condition = (starting_d >= 10) ? (starting_d / 10 == 4) : (starting_d == 4);
+
+        if(visa_condition && (length == 13 || length == 16))
         {
             printf("VISA\n");
         }
@@ -75,7 +82,7 @@ void check_n(int starting_d, int length, const int first[], int first_len, const
         {
             printf("AMEX\n");
         }
-        else if((starting_d == 51 || starting_d == 52 || starting_d == 53 || starting_d == 54 || starting_d == 55) && length == 16)
+        else if((starting_d >= 51 && starting_d <= 55) && length == 16)
         {
             printf("MASTERCARD\n");
         }
@@ -90,10 +97,10 @@ void check_n(int starting_d, int length, const int first[], int first_len, const
     }
 }
 
-int get_starting(long n, int *length)
+int get_starting(long long n, int *length)
 {
     int len = 0;
-    for (long t = n; t > 0; t /= 10) len++;
+    for (long long t = n; t > 0; t /= 10) len++;
     *length = len;
 
     while (n >= 100) n /= 10;
