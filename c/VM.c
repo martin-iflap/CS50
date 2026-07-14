@@ -5,182 +5,468 @@
 #define STACK_SIZE 256
 
 
-typedef struct {
-    bool running;
-    int ip;
-    int sp;
-
-    float stack[STACK_SIZE];
-} VM;
+// -------------------  Runtime values  ----------------------
 
 typedef enum {
-   PSH, // push
-   ADD, // add 2 top numbers
-   SBT, // subtract top 2 numbers
-   POP, // pop
-   MLTP, // multiply 2 top numbers
-   DVD, // divide 2 top numbers
-   SQRT, // square root of top number
-   SIN, // sin of top number in radians
-   COS, // cos of top number in radians
-   MOD, // take modulo of the number at the top of the stack with the number after MOD operand
-   ABS, // absolute value of top number
-   HLT // halt
+    NUMBER,
+    BOOLEAN,
+    STRING
+} ValueType;
+
+typedef struct {
+
+    ValueType type;
+
+    union {
+        float number;
+        bool boolean;
+        char *string;
+
+    } value;
+
+} Value;
+
+// ---------------------------  Instruction set  -------------------------
+
+typedef enum {
+   PSH,     // push
+   ADD,     // add 2 top numbers
+   SBT,     // subtract top 2 numbers
+   POP,     // pop
+   MLTP,    // multiply 2 top numbers
+   DVD,     // divide 2 top numbers
+   SQRT,    // square root of top number
+   SIN,     // sin of top number in radians
+   COS,     // cos of top number in radians
+   MOD,     // modulo
+   ABS,     // absolute value
+
+   EQ,      // equal
+   NEQ,     // not equal
+   LT,      // less than
+   GT,      // greater than
+   LTE,     // less than or equal
+   GTE,     // greater than or equal
+
+   HLT      // halt
+
 } InstructionSet;
 
-const float program[] = {
-    PSH, 0,
-    COS,
-    POP,
-    
-    PSH, 5,
-    PSH, 6,
-    ADD,
-    PSH, 4,
-    MLTP,
-    POP,
+// -------------------------------  Instructions  ---------------------------
+// The future compiler will generate these automatically.
 
-    PSH, 67,
-    PSH, 7,
-    SBT,
-    PSH, 8,
-    DVD,
-    POP,
+typedef struct {
+    InstructionSet opcode;
+    bool has_operand;
+    // Operand type is separate from runtime Values.
+    // Instructions only describe what the VM should do.
+    ValueType operand_type;
+    union {
+        float number;
+        bool boolean;
+        char *string;
+        int address; // later used for jumps/variables
+    } operand;
+} Instruction;
 
-    PSH, 1.57,
-    SIN,
-    PSH, 64,
-    MLTP,
-    SQRT,
-    POP,
+// --------------------------  Virtual Machine  ------------------------------
 
-    HLT
+typedef struct {
+    bool running;
+    int ip;     // instruction pointer
+    int sp;     // stack pointer
+
+    Value stack[STACK_SIZE]; // stack
+} VM;
+
+// ----------------------------  Program  -----------------------------
+
+Instruction program[] = {
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 0},
+    {.opcode = COS},
+    {.opcode = POP},
+
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 5},
+    { .opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 6},
+    {.opcode = ADD},
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 4},
+    {.opcode = MLTP},
+    {.opcode = POP},
+
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 67},
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 7},
+    {.opcode = SBT},
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 8},
+    {.opcode = DVD},
+    {.opcode = POP},
+
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 1.57f},
+    {.opcode = SIN},
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 64},
+    {.opcode = MLTP},
+    {.opcode = SQRT},
+    {.opcode = POP},
+
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 67},
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 76},
+    {.opcode = GT},
+    {.opcode = POP},
+
+    {.opcode = HLT}
 };
 
-int fetch(const VM *vm) {
-    // fetch a command from program
+// ---------------------------------  Fetch  --------------------------------
+
+Instruction fetch(VM *vm)
+{
     return program[vm->ip];
 }
 
-void push(float value, VM *vm) {
-    // push a value onto the stack
-    if (vm->sp >= STACK_SIZE - 1) {
-        printf("Stack overflow.");
+// ------------------------------  Stack push functions  --------------------------
+
+void push_number(VM *vm, float number)
+{
+    if(vm->sp >= STACK_SIZE - 1)
+    {
+        printf("Stack overflow.\n");
         vm->running = false;
+        return;
     }
-    vm->stack[++vm->sp] = value;
+
+    vm->sp++;
+    vm->stack[vm->sp].type = NUMBER;
+    vm->stack[vm->sp].value.number = number;
 }
 
-float pop(VM *vm) {
-    // pop and return the top value from the stack
-    if (vm->sp < 0) {
-        printf("Stack underflow.");
+void push_bool(VM *vm, bool boolean)
+{
+    if(vm->sp >= STACK_SIZE - 1)
+    {
+        printf("Stack overflow.\n");
         vm->running = false;
+        return;
     }
-    float popped = vm->stack[vm->sp--];
-    return popped;
+
+    vm->sp++;
+    vm->stack[vm->sp].type = BOOLEAN;
+    vm->stack[vm->sp].value.boolean = boolean;
 }
 
-void eval(int instr, VM *arg_vm) {
-    // evaluate the instruction
-    VM vm = *arg_vm;
-    switch (instr) {
-        case HLT: {
-            vm.running = false;
+void push_string(VM *vm, char *string)
+{
+    if(vm->sp >= STACK_SIZE - 1)
+    {
+        printf("Stack overflow.\n");
+        vm->running = false;
+        return;
+    }
+
+    vm->sp++;
+    vm->stack[vm->sp].type = STRING;
+    vm->stack[vm->sp].value.string = string;
+}
+
+// ----------------------------------  Stack pop functions  --------------------------------
+
+Value pop(VM *vm)
+// Removes one value from the stack.
+{
+    if(vm->sp < 0)
+    {
+        printf("Stack underflow.\n");
+        vm->running = false;
+        Value empty = {
+            .type = NUMBER,
+            .value.number = 0
+        };
+        return empty;
+    }
+
+    return vm->stack[vm->sp--];
+}
+
+float pop_number(VM *vm)
+// Pop specifically a number.
+{
+    Value value = pop(vm);
+
+    if(value.type != NUMBER)
+    {
+        printf("VM Error: Expected NUMBER.\n");
+        vm->running = false;
+        return 0;
+    }
+    return value.value.number;
+}
+
+bool pop_bool(VM *vm)
+// Pop specifically a boolean.
+{
+    Value value = pop(vm);
+
+    if(value.type != BOOLEAN)
+    {
+        printf("VM Error: Expected BOOLEAN.\n");
+        vm->running = false;
+        return false;
+    }
+    return value.value.boolean;
+}
+
+char *pop_string(VM *vm)
+// Pop specifically a string.
+{
+    Value value = pop(vm);
+
+    if(value.type != STRING)
+    {
+        printf("VM Error: Expected STRING.\n");
+        vm->running = false;
+        return NULL;
+    }
+    return value.value.string;
+}
+
+// ----------------------------  Debug helper  ---------------------------------------
+
+void print_value(Value value)
+// Print any Value stored on the stack.
+{
+    switch(value.type)
+    {
+        case NUMBER:
+            printf("%.2f\n", value.value.number);
+            break;
+
+        case BOOLEAN:
+
+            if(value.value.boolean)
+                printf("true\n");
+            else
+                printf("false\n");
+            break;
+
+        case STRING:
+            printf("%s\n", value.value.string);
+            break;
+    }
+}
+
+// ----------------------------------  Evaluation  -----------------------------
+// Execute one instruction.
+// The VM receives an instruction and modifies its state.
+
+void eval(Instruction instruction, VM *vm)
+{
+    switch(instruction.opcode)
+    {
+        case HLT:
+        {
+            vm->running = false;
             printf("done\n");
             break;
         }
-        case PSH: {
-	        push(program[++vm.ip], &vm);
-	        break;
-        }
-        case POP: {
-	        printf("popped %.2f\n", pop(&vm));
-	        break;
-	    }
-	    case ADD: {
-	        float a = pop(&vm);
-	        float b =pop(&vm);
+        case PSH:
+        {
+            // Push the operand stored inside the instruction.
+            switch(instruction.operand_type)
+            {
+                case NUMBER:
+                    push_number(
+                        vm,
+                        instruction.operand.number
+                    );
+                    break;
 
-	        push(a + b, &vm);
+                case BOOLEAN:
+                    push_bool(
+                        vm,
+                        instruction.operand.boolean
+                    );
+                    break;
 
-	        break;
-	    }
-        case SBT: {
-            float a = pop(&vm);
-	        float b = pop(&vm);
-            
-            push(b - a, &vm);
-
+                case STRING:
+                    push_string(
+                        vm,
+                        instruction.operand.string
+                    );
+                    break;
+            }
             break;
         }
-        case MLTP: {
-            float a = pop(&vm);
-            float b = pop(&vm);
-
-            push(a * b, &vm);
-
+        case POP:
+        {
+            Value value = pop(vm);
+            print_value(value);
             break;
         }
-        case DVD: {
-            float a = pop(&vm);
-            if (a == 0) {
-                printf("Zero Division Error.");
-                vm.running = false;
+        // ------ Arithmetic -------
+        case ADD:
+        {
+            float a = pop_number(vm);
+            float b = pop_number(vm);
+            float result = b + a;
+
+            push_number(vm, result);
+            break;
+        }
+        case SBT:
+        {
+            float a = pop_number(vm);
+            float b = pop_number(vm);
+            float result = b - a;
+
+            push_number(vm, result);
+            break;
+        }
+        case MLTP:
+        {
+            float a = pop_number(vm);
+            float b = pop_number(vm);
+            float result = b * a;
+
+            push_number(vm, result);
+            break;
+        }
+        case DVD:
+        {
+            float a = pop_number(vm);
+            if(a == 0)
+            {
+                printf("Zero Division Error.\n");
+                vm->running = false;
                 break;
             }
-            float b = pop(&vm);
 
-            push((float)b / a, &vm);
+            float b = pop_number(vm);
+            float result = b / a;
 
+            push_number(vm, result);
             break;
         }
-        case SQRT: {
-            float num = pop(&vm);
-            push(sqrt(num), &vm);
+        // --------------- Math functions ----------------
+        case SQRT:
+        {
+            float number = pop_number(vm);
+            float result = sqrt(number);
 
+            push_number(vm, result);
             break;
         }
-        case SIN: {
-            float num = pop(&vm);
-            push(sin(num), &vm);
+        case SIN:
+        {
+            float number = pop_number(vm);
+            float result = sin(number);
 
+            push_number(vm, result);
             break;
         }
-        case COS: {
-            float num = pop(&vm);
-            push(cos(num), &vm);
+        case COS:
+        {
+            float number = pop_number(vm);
+            float result = cos(number);
 
+            push_number(vm, result);
             break;
         }
-        case MOD: {
-            int modulo = program[++vm.ip];
-            int num = pop(&vm);
-            push(num % modulo, &vm);
+        case ABS:
+        {
+            float number = pop_number(vm);
+            float result = fabs(number);
 
+            push_number(vm, result);
             break;
         }
-        case ABS: {
-            float num = pop(&vm);
-            push(abs(num), &vm);
+        case MOD:
+        {
+            // Currently only supports integer modulo.
+            // Later we can add proper integer values.
+            float a = pop_number(vm);
+            int modulo = instruction.operand.number;
+            int result = ((int)a) % modulo;
 
+            push_number(vm, result);
             break;
         }
-        default: {
-            printf("Unknown opcode %d\n", instr);
-            vm.running = false;
+        // ------------------ Comparisons -----------------
+        case EQ:
+        {
+            float a = pop_number(vm);
+            float b = pop_number(vm);
+
+            push_bool(vm, a == b);
+            break;
+        }
+        case NEQ:
+        {
+            float a = pop_number(vm);
+            float b = pop_number(vm);
+
+            push_bool(vm, a != b);
+            break;
+        }
+        case LT:
+        {
+            float a = pop_number(vm);
+            float b = pop_number(vm);
+
+            push_bool(vm, b < a);
+            break;
+        }
+        case GT:
+        {
+            float a = pop_number(vm);
+            float b = pop_number(vm);
+
+            push_bool(vm, b > a);
+            break;
+        }
+        case LTE:
+        {
+            float a = pop_number(vm);
+            float b = pop_number(vm);
+
+            push_bool(vm, b <= a);
+            break;
+        }
+        case GTE:
+        {
+            float a = pop_number(vm);
+            float b = pop_number(vm);
+
+            push_bool(vm, b >= a);
+            break;
+        }
+        default:
+        {
+            printf(
+                "Unknown opcode %d\n",
+                instruction.opcode
+            );
+            vm->running = false;
+
+            break;
         }
     }
-    *arg_vm = vm;
 }
 
-int main() {
-    VM vm_1 = {.running = true, .ip=0, .sp=-1};
+// -------------------------------------  Main  -------------------------------------
 
-    while (vm_1.running) {
-        eval(fetch(&vm_1), &vm_1);
-        vm_1.ip++; // increment the ip every iteration, note: also increments one last time after HLT command.
+int main()
+{
+    VM vm = {
+        .running = true,
+        .ip = 0,
+        .sp = -1
+    };
+
+    while(vm.running)
+    {
+        Instruction instruction = fetch(&vm);
+        eval(instruction, &vm);
+        // Move to next instruction.
+        // Later jump instructions will modify this.
+        vm.ip++;
     }
+    return 0;
 }
-
-// convert this thing to actuall bytes at some point perhaps
