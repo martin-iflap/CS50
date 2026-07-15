@@ -48,6 +48,16 @@ typedef enum {
    LTE,     // less than or equal
    GTE,     // greater than or equal
 
+   AND,
+   OR,
+   NOT,
+
+   JMP, // jump to
+   JMP_IF_FALSE, // jump to if false. think these two through a bit and make sure it makes sense long term
+
+   STORE, // implement these later!!
+   LOAD,
+
    HLT      // halt
 
 } InstructionSet;
@@ -84,32 +94,46 @@ typedef struct {
 Instruction program[] = {
     {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 0},
     {.opcode = COS},
-    {.opcode = POP},
+    {.opcode = POP}, // = 1.00
+
+    {.opcode = JMP, .has_operand = true, .operand_type = NUMBER, .operand.number = 6},
 
     {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 5},
     { .opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 6},
     {.opcode = ADD},
     {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 4},
     {.opcode = MLTP},
-    {.opcode = POP},
+    {.opcode = POP}, // = 44.00
 
     {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 67},
     {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 7},
     {.opcode = SBT},
     {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 8},
     {.opcode = DVD},
-    {.opcode = POP},
+    {.opcode = POP}, // = 7.50
 
     {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 1.57f},
     {.opcode = SIN},
     {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 64},
     {.opcode = MLTP},
     {.opcode = SQRT},
-    {.opcode = POP},
+    {.opcode = POP}, // = 8.00
+
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 67},
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 76},
+    {.opcode = GT}, // = false
+    {.opcode = NOT},
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 67},
+    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 76},
+    {.opcode = LTE}, // = true
+    {.opcode = AND},
+    {.opcode = POP}, // = true
 
     {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 67},
     {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 76},
     {.opcode = GT},
+    {.opcode = JMP_IF_FALSE, .has_operand = true, .operand_type = NUMBER, .operand.number = 2},
+    {.opcode = PSH, .has_operand = true, .operand_type = STRING, .operand.string = "this got skipped"},
     {.opcode = POP},
 
     {.opcode = HLT}
@@ -437,6 +461,58 @@ void eval(Instruction instruction, VM *vm)
             push_bool(vm, b >= a);
             break;
         }
+        // ------------------ Logical operators --------------
+        case AND:
+        {
+            bool a = pop_bool(vm);
+            bool b = pop_bool(vm);
+
+            push_bool(vm, a && b);
+            break;
+        }
+        case OR:
+        {
+            bool a = pop_bool(vm);
+            bool b = pop_bool(vm);
+
+            push_bool(vm, a || b);
+            break;
+        }
+        case NOT:
+        {
+            bool a = pop_bool(vm);
+
+            push_bool(vm, !a);
+            break;
+        }
+        // ------------------ Jumps -------------------
+        case JMP:
+        {
+            if (instruction.operand_type != NUMBER)
+            {
+                printf("Jump cannot be performed on non-number.");
+                vm->running = false;
+                break;
+            }
+            vm->ip = vm->ip + instruction.operand.number;
+            break;
+        }
+        case JMP_IF_FALSE:
+        {
+            if (instruction.operand_type != NUMBER)
+            {
+                printf("Jump cannot be performed on non-number.");
+                vm->running = false;
+                break;
+            }
+            bool a = pop_bool(vm);
+            if (!a)
+            {
+                vm->ip = vm->ip + instruction.operand.number;
+            }
+            break;
+        }
+
         default:
         {
             printf(
