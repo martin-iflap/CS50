@@ -3,6 +3,7 @@
 #include <math.h>
 
 #define STACK_SIZE 256
+#define MEM_SIZE 256
 
 
 // -------------------  Runtime values  ----------------------
@@ -14,16 +15,13 @@ typedef enum {
 } ValueType;
 
 typedef struct {
-
     ValueType type;
 
     union {
         float number;
         bool boolean;
         char *string;
-
     } value;
-
 } Value;
 
 // ---------------------------  Instruction set  -------------------------
@@ -52,11 +50,14 @@ typedef enum {
    OR,
    NOT,
 
-   JMP, // jump to
-   JMP_IF_FALSE, // jump to if false. think these two through a bit and make sure it makes sense long term
+   JMP, // jump by
+   JMP_IF_FALSE, // jump by if false
 
-   STORE, // implement these later!!
+   STORE,
    LOAD,
+
+   RETURN, // maybe add these later but we'll see
+   CALL,
 
    HLT      // halt
 
@@ -64,18 +65,25 @@ typedef enum {
 
 // -------------------------------  Instructions  ---------------------------
 // The future compiler will generate these automatically.
+typedef enum {
+    OPERAND_NONE,
+    OPERAND_NUMBER,
+    OPERAND_BOOLEAN,
+    OPERAND_STRING,
+    OPERAND_SLOT,
+    OPERAND_JUMP
+} OperandType;
 
 typedef struct {
     InstructionSet opcode;
     bool has_operand;
-    // Operand type is separate from runtime Values.
-    // Instructions only describe what the VM should do.
-    ValueType operand_type;
+    OperandType operand_type;
     union {
         float number;
         bool boolean;
         char *string;
-        int address; // later used for jumps/variables
+        int slot; // slot for memory
+        int offset; // offset for jumps
     } operand;
 } Instruction;
 
@@ -87,53 +95,54 @@ typedef struct {
     int sp;     // stack pointer
 
     Value stack[STACK_SIZE]; // stack
+    Value memory[MEM_SIZE]; // memory array
 } VM;
 
 // ----------------------------  Program  -----------------------------
 
 Instruction program[] = {
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 0},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 0},
     {.opcode = COS},
     {.opcode = POP}, // = 1.00
 
-    {.opcode = JMP, .has_operand = true, .operand_type = NUMBER, .operand.number = 6},
+    {.opcode = JMP, .has_operand = true, .operand_type = OPERAND_JUMP, .operand.offset = 6},
 
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 5},
-    { .opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 6},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 5},
+    { .opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 6},
     {.opcode = ADD},
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 4},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 4},
     {.opcode = MLTP},
     {.opcode = POP}, // = 44.00
 
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 67},
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 7},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 67},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 7},
     {.opcode = SBT},
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 8},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 8},
     {.opcode = DVD},
     {.opcode = POP}, // = 7.50
 
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 1.57f},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 1.57f},
     {.opcode = SIN},
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 64},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 64},
     {.opcode = MLTP},
     {.opcode = SQRT},
     {.opcode = POP}, // = 8.00
 
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 67},
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 76},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 67},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 76},
     {.opcode = GT}, // = false
     {.opcode = NOT},
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 67},
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 76},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 67},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 76},
     {.opcode = LTE}, // = true
     {.opcode = AND},
     {.opcode = POP}, // = true
 
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 67},
-    {.opcode = PSH, .has_operand = true, .operand_type = NUMBER, .operand.number = 76},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 67},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 76},
     {.opcode = GT},
-    {.opcode = JMP_IF_FALSE, .has_operand = true, .operand_type = NUMBER, .operand.number = 2},
-    {.opcode = PSH, .has_operand = true, .operand_type = STRING, .operand.string = "this got skipped"},
+    {.opcode = JMP_IF_FALSE, .has_operand = true, .operand_type = OPERAND_JUMP, .operand.offset = 2},
+    {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_STRING, .operand.string = "this got skipped"},
     {.opcode = POP},
 
     {.opcode = HLT}
@@ -190,6 +199,16 @@ void push_string(VM *vm, char *string)
     vm->stack[vm->sp].value.string = string;
 }
 
+void push_value(VM *vm, Value value)
+{
+    if(vm->sp >= STACK_SIZE - 1)
+        {
+            printf("Stack overflow.\n");
+            vm->running = false;
+            return;
+        }
+    vm->stack[++vm->sp] = value;
+}
 // ----------------------------------  Stack pop functions  --------------------------------
 
 Value pop(VM *vm)
@@ -295,26 +314,32 @@ void eval(Instruction instruction, VM *vm)
             // Push the operand stored inside the instruction.
             switch(instruction.operand_type)
             {
-                case NUMBER:
+                case OPERAND_NUMBER:
                     push_number(
                         vm,
                         instruction.operand.number
                     );
                     break;
 
-                case BOOLEAN:
+                case OPERAND_BOOLEAN:
                     push_bool(
                         vm,
                         instruction.operand.boolean
                     );
                     break;
 
-                case STRING:
+                case OPERAND_STRING:
                     push_string(
                         vm,
                         instruction.operand.string
                     );
                     break;
+                default:
+                {
+                    printf("Unsupported operand type %d for PUSH command.", instruction.operand_type);
+                    vm->running = false;
+                    break;
+                }
             }
             break;
         }
@@ -488,31 +513,72 @@ void eval(Instruction instruction, VM *vm)
         // ------------------ Jumps -------------------
         case JMP:
         {
-            if (instruction.operand_type != NUMBER)
+            if (instruction.operand_type != OPERAND_JUMP)
             {
-                printf("Jump cannot be performed on non-number.");
+                printf("Type Error for JMP command operand.");
                 vm->running = false;
                 break;
             }
-            vm->ip = vm->ip + instruction.operand.number;
+            vm->ip = vm->ip + instruction.operand.offset;
             break;
         }
         case JMP_IF_FALSE:
         {
-            if (instruction.operand_type != NUMBER)
+            if (instruction.operand_type != OPERAND_JUMP)
             {
-                printf("Jump cannot be performed on non-number.");
+                printf("Type Error for JMP_IF_FALSE command operand.");
                 vm->running = false;
                 break;
             }
             bool a = pop_bool(vm);
             if (!a)
             {
-                vm->ip = vm->ip + instruction.operand.number;
+                vm->ip = vm->ip + instruction.operand.offset;
             }
             break;
         }
+        // ------------------ Memory ------------------
+        case STORE:
+        {
+            if (instruction.operand_type != OPERAND_SLOT)
+            {
+                printf("Type Error for store operand type.");
+                vm->running = false;
+                break;
+            }
 
+            int index = (int)instruction.operand.slot;
+            if(index < 0 || index >= MEM_SIZE)
+            {
+                printf("Memory index out of bounds.\n");
+                vm->running = false;
+                break;
+            }
+
+            vm->memory[index] = pop(vm);
+            break;
+        }
+        case LOAD:
+        {
+            if (instruction.operand_type != OPERAND_SLOT)
+            {
+                printf("Type Error for load operand type.");
+                vm->running = false;
+                break;
+            }
+
+            int index = (int)instruction.operand.slot;
+            if(index < 0 || index >= MEM_SIZE)
+            {
+                printf("Memory index out of bounds.\n");
+                vm->running = false;
+                break;
+            }
+
+            Value fetched = vm->memory[index];
+            push_value(vm, fetched);
+            break;
+        }
         default:
         {
             printf(
