@@ -1,173 +1,449 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h> // check if I need all these
+#include <string.h>
 
 #define MAX_LENGTH 120
-#define MAX_TOKENS 70
+#define MAX_TOKENS 128
 
+// -------------------------------------------  TOKEN DEFINITIONS  -------------------------------------------
 
 typedef enum
 {
+    /* Literals */
     TOKEN_IDENTIFIER,
     TOKEN_NUMBER,
+    TOKEN_STRING,
+
+    /* Keywords */
     TOKEN_IF,
     TOKEN_ELSE,
     TOKEN_WHILE,
     TOKEN_PRINT,
 
+    /* Arithmetic */
     TOKEN_PLUS,
     TOKEN_MINUS,
     TOKEN_STAR,
     TOKEN_SLASH,
+    TOKEN_PERCENT,
 
+    /* Assignment */
     TOKEN_EQUAL,
 
+    /* Comparisons */
+    TOKEN_EQUAL_EQUAL,
+    TOKEN_BANG,
+    TOKEN_BANG_EQUAL,
+
+    TOKEN_GREATER,
+    TOKEN_GREATER_EQUAL,
+
+    TOKEN_LESS,
+    TOKEN_LESS_EQUAL,
+
+    /* Boolean operators (keywords later) */
+    TOKEN_AND,
+    TOKEN_OR,
+    TOKEN_NOT,
+
+    /* Brackets */
     TOKEN_LPAREN,
     TOKEN_RPAREN,
 
     TOKEN_LBRACE,
     TOKEN_RBRACE,
 
+    TOKEN_LBRACKET,
+    TOKEN_RBRACKET,
+
+    TOKEN_COMMA,
+    TOKEN_SEMICOLON,
+
+    TOKEN_UNKNOWN,
     TOKEN_EOF
 
 } TokenType;
 
+// -----------------------------------------  TOKEN  ---------------------------------------------------
 
 typedef struct
 {
     TokenType type;
-    char lexeme[64];
+    const char *start; // pointer into the original source
+    int length; // number of characters
 } Token;
 
-Token tokens[MAX_TOKENS];
+// --------------------------------------  LEXER  --------------------------------------
 
-
-bool isDelimiter(char chr)
-// check if the provided character is delimiter
+typedef struct
 {
-    return (chr == ' ' || chr == '+' || chr == '-'
-            || chr == '*' || chr == '/' || chr == ','
-            || chr == ';' || chr == '%' || chr == '>'
-            || chr == '<' || chr == '=' || chr == '('
-            || chr == ')' || chr == '[' || chr == ']'
-            || chr == '{' || chr == '}');
+    const char *source;
+    int start;
+    int current;
+    Token tokens[MAX_TOKENS];
+    int token_count;
+} Lexer;
+
+// --------------------------------------  BASIC HELPERS  --------------------------------------
+
+bool isAtEnd(Lexer *lexer)
+{
+    return lexer->source[lexer->current] == '\0';
 }
 
-bool isOperator(char chr)
-// check if the provided character is operator
+char advance(Lexer *lexer)
 {
-    return (chr == '+' || chr == '-' || chr == '*'
-            || chr == '/' || chr == '>' || chr == '<'
-            || chr == '=' || chr == '!');
+    return lexer->source[lexer->current++];
 }
 
-bool isValidIdentifier(char* str)
+char peek(Lexer *lexer)
 {
-    return (str[0] != '0' && str[0] != '1' && str[0] != '2' // check this function and make sure it's good
-            && str[0] != '3' && str[0] != '4'
-            && str[0] != '5' && str[0] != '6'
-            && str[0] != '7' && str[0] != '8'
-            && str[0] != '9' && !isDelimiter(str[0]));
+    return lexer->source[lexer->current];
 }
 
-bool isKeyword(char* str)
+char peekNext(Lexer *lexer)
 {
-    const char* keywords[] = {"if", "else", "while", "print"};
-    for (int i = 0;
-        i < sizeof(keywords) / sizeof(keywords[0]); i++) {
-        if (strcmp(str, keywords[i]) == 0) {
-            return true;
+    if (isAtEnd(lexer))
+        return '\0';
+    return lexer->source[lexer->current + 1];
+}
+
+// --------------------------------------  TOKEN CREATION --------------------------------------  
+
+void addToken(Lexer *lexer, TokenType type)
+{
+    if (lexer->token_count >= MAX_TOKENS)
+    {
+        printf("Too many tokens.\n");
+        return;
+    }
+
+    Token *token = &lexer->tokens[lexer->token_count++];
+
+    token->type = type;
+    token->start = lexer->source + lexer->start;
+    token->length = lexer->current - lexer->start;
+}
+
+// --------------------------------------  KEYWORDS  ----------------------------------------------------
+
+TokenType keywordType(const char *text, int length)
+{
+    if (length == 2 && strncmp(text, "if", 2) == 0)
+        return TOKEN_IF;
+
+    if (length == 4 && strncmp(text, "else", 4) == 0)
+        return TOKEN_ELSE;
+
+    if (length == 5 && strncmp(text, "while", 5) == 0)
+        return TOKEN_WHILE;
+
+    if (length == 5 && strncmp(text, "print", 5) == 0)
+        return TOKEN_PRINT;
+
+    if (length == 3 && strncmp(text, "and", 3) == 0)
+        return TOKEN_AND;
+
+    if (length == 2 && strncmp(text, "or", 2) == 0)
+        return TOKEN_OR;
+
+    if (length == 3 && strncmp(text, "not", 3) == 0)
+        return TOKEN_NOT;
+
+    return TOKEN_IDENTIFIER;
+}
+
+// --------------------------------------  SCAN IDENTIFIER  ------------------------------------------
+
+void scanIdentifier(Lexer *lexer)
+{
+    while (isalnum(peek(lexer)) || peek(lexer) == '_')
+    {
+        advance(lexer);
+    }
+    TokenType type =
+        keywordType(
+            lexer->source + lexer->start,
+            lexer->current - lexer->start);
+
+    addToken(lexer, type);
+}
+
+// --------------------------------------  SCAN NUMBER  -----------------------------------------
+
+void scanNumber(Lexer *lexer)
+{
+    while (isdigit(peek(lexer)))
+    {
+        advance(lexer);
+    }
+    /* Decimal numbers */
+    if (peek(lexer) == '.' && isdigit(peekNext(lexer)))
+    {
+        advance(lexer);
+        while (isdigit(peek(lexer)))
+        {
+            advance(lexer);
         }
     }
-    return false;
+    addToken(lexer, TOKEN_NUMBER);
 }
 
-bool isInteger(char* str)
+// --------------------------------------  SCAN ONE TOKEN  ---------------------------------------------
+
+void scanToken(Lexer *lexer)
 {
-    if (str == NULL || *str == '\0') {
-        return false;
+    char c = advance(lexer);
+    switch (c)
+    {
+        /* Ignore whitespace */
+        case ' ':
+        case '\r':
+        case '\t':
+        case '\n':
+            break;
+
+        /* Single-character tokens */
+        case '(':
+            addToken(lexer, TOKEN_LPAREN);
+            break;
+
+        case ')':
+            addToken(lexer, TOKEN_RPAREN);
+            break;
+
+        case '{':
+            addToken(lexer, TOKEN_LBRACE);
+            break;
+
+        case '}':
+            addToken(lexer, TOKEN_RBRACE);
+            break;
+
+        case '[':
+            addToken(lexer, TOKEN_LBRACKET);
+            break;
+
+        case ']':
+            addToken(lexer, TOKEN_RBRACKET);
+            break;
+
+        case ',':
+            addToken(lexer, TOKEN_COMMA);
+            break;
+
+        case ';':
+            addToken(lexer, TOKEN_SEMICOLON);
+            break;
+
+        case '+':
+            addToken(lexer, TOKEN_PLUS);
+            break;
+
+        case '-':
+            addToken(lexer, TOKEN_MINUS);
+            break;
+
+        case '*':
+            addToken(lexer, TOKEN_STAR);
+            break;
+
+        case '/':
+            addToken(lexer, TOKEN_SLASH);
+            break;
+
+        case '%':
+            addToken(lexer, TOKEN_PERCENT);
+            break;
+
+        /* Two-character operators */
+        case '=':
+            if (peek(lexer) == '=')
+            {
+                advance(lexer);
+                addToken(lexer, TOKEN_EQUAL_EQUAL);
+            }
+            else
+            {
+                addToken(lexer, TOKEN_EQUAL);
+            }
+            break;
+
+        case '!':
+            if (peek(lexer) == '=')
+            {
+                advance(lexer);
+                addToken(lexer, TOKEN_BANG_EQUAL);
+            }
+            else
+            {
+                addToken(lexer, TOKEN_BANG);
+            }
+            break;
+
+        case '>':
+            if (peek(lexer) == '=')
+            {
+                advance(lexer);
+                addToken(lexer, TOKEN_GREATER_EQUAL);
+            }
+            else
+            {
+                addToken(lexer, TOKEN_GREATER);
+            }
+            break;
+
+        case '<':
+            if (peek(lexer) == '=')
+            {
+                advance(lexer);
+                addToken(lexer, TOKEN_LESS_EQUAL);
+            }
+            else
+            {
+                addToken(lexer, TOKEN_LESS);
+            }
+            break;
+
+        /* String literal */
+        case '"':
+        case '\'':
+            char quoteChar = lexer->source[lexer->current - 1];
+            
+            while (!isAtEnd(lexer) && peek(lexer) != quoteChar)
+            {
+                advance(lexer);
+            }
+
+            if (isAtEnd(lexer))
+            {
+                printf("Lexer Error: Unterminated string.\n");
+                return;
+            }
+            advance(lexer);
+            addToken(lexer, TOKEN_STRING);
+
+            break;
+
+        default:
+            if (isdigit(c))
+            {
+                scanNumber(lexer);
+            }
+
+            else if (isalpha(c) || c == '_')
+            {
+                scanIdentifier(lexer);
+            }
+
+            else
+            {
+                addToken(lexer, TOKEN_UNKNOWN);
+            }
     }
-    int i = 0;
-    while (isdigit(str[i])) {
-        i++;
-    }
-    return str[i] == '\0';
 }
 
-// trims a substring from a given string's start and end
-// position
-char* getSubstring(char* str, int start, int end)
+// --------------------------------------  LEXICAL ANALYZER  ----------------------------------------
+
+void lexicalAnalyzer(Lexer *lexer)
 {
-    int length = strlen(str);
-    int subLength = end - start + 1;
-    char* subStr
-        = (char*)malloc((subLength + 1) * sizeof(char)); // this fucker leaks memory
-    strncpy(subStr, str + start, subLength);
-    subStr[subLength] = '\0';
-    return subStr;
+    while (!isAtEnd(lexer))
+    {
+        lexer->start = lexer->current;
+
+        scanToken(lexer);
+    }
+    lexer->start = lexer->current;
+    addToken(lexer, TOKEN_EOF);
 }
 
-int lexicalAnalyzer(char* input)
+// --------------------------------------  DEBUG  ----------------------------------------------------
+
+const char *tokenName(TokenType type)
 {
-    int left = 0, right = 0;
-    int len = strlen(input);
+    switch (type)
+    {
+        case TOKEN_IDENTIFIER:      return "IDENTIFIER";
+        case TOKEN_NUMBER:          return "NUMBER";
+        case TOKEN_STRING:          return "STRING";
 
-    while (right <= len && left <= right) {
-        if (!isDelimiter(input[right]))
-            right++;
+        case TOKEN_IF:              return "IF";
+        case TOKEN_ELSE:            return "ELSE";
+        case TOKEN_WHILE:           return "WHILE";
+        case TOKEN_PRINT:           return "PRINT";
 
-        if (isDelimiter(input[right]) && left == right) {
-            if (isOperator(input[right]))
-                printf("Token: Operator, Value: %c\n",
-                       input[right]);
+        case TOKEN_AND:             return "AND";
+        case TOKEN_OR:              return "OR";
+        case TOKEN_NOT:             return "NOT";
 
-            right++;
-            left = right;
-        }
-        else if (isDelimiter(input[right]) && left != right
-                 || (right == len && left != right)) {
-            char* subStr
-                = getSubstring(input, left, right - 1);
+        case TOKEN_PLUS:            return "PLUS";
+        case TOKEN_MINUS:           return "MINUS";
+        case TOKEN_STAR:            return "STAR";
+        case TOKEN_SLASH:           return "SLASH";
+        case TOKEN_PERCENT:         return "PERCENT";
 
-            if (isKeyword(subStr))
-                printf("Token: Keyword, Value: %s\n",
-                       subStr);
+        case TOKEN_EQUAL:           return "EQUAL";
+        case TOKEN_EQUAL_EQUAL:     return "EQUAL_EQUAL";
 
-            else if (isInteger(subStr))
-                printf("Token: Integer, Value: %s\n",
-                       subStr);
+        case TOKEN_BANG:            return "BANG";
+        case TOKEN_BANG_EQUAL:      return "BANG_EQUAL";
 
-            else if (isValidIdentifier(subStr)
-                     && !isDelimiter(input[right - 1]))
-                printf("Token: Identifier, Value: %s\n",
-                       subStr);
+        case TOKEN_GREATER:         return "GREATER";
+        case TOKEN_GREATER_EQUAL:   return "GREATER_EQUAL";
 
-            else if (!isValidIdentifier(subStr)
-                     && !isDelimiter(input[right - 1]))
-                printf("Token: Unidentified, Value: %s\n",
-                       subStr);
-            left = right;
-        }
+        case TOKEN_LESS:            return "LESS";
+        case TOKEN_LESS_EQUAL:      return "LESS_EQUAL";
+
+        case TOKEN_LPAREN:          return "LPAREN";
+        case TOKEN_RPAREN:          return "RPAREN";
+
+        case TOKEN_LBRACE:          return "LBRACE";
+        case TOKEN_RBRACE:          return "RBRACE";
+
+        case TOKEN_LBRACKET:        return "LBRACKET";
+        case TOKEN_RBRACKET:        return "RBRACKET";
+
+        case TOKEN_COMMA:           return "COMMA";
+        case TOKEN_SEMICOLON:       return "SEMICOLON";
+
+        case TOKEN_UNKNOWN:         return "UNKNOWN";
+        case TOKEN_EOF:             return "EOF";
     }
+
+    return "INVALID";
+}
+
+void printTokens(Lexer *lexer)
+{
+    printf("\n========== TOKENS ==========\n\n");
+
+    for (int i = 0; i < lexer->token_count; i++)
+    {
+        Token *token = &lexer->tokens[i];
+
+        printf("%-18s  ->  \"%.*s\"\n",
+               tokenName(token->type),
+               token->length,
+               token->start);
+    }
+}
+
+// --------------------------------------  MAIN  ------------------------------------------------------
+
+int main(void)
+{
+    char source[MAX_LENGTH] =
+        "if x > 5 {print('x is greater')} else {print('x is smaller')}";
+
+    Lexer lexer =
+    {
+        .source = source,
+        .start = 0,
+        .current = 0,
+        .token_count = 0
+    };
+    lexicalAnalyzer(&lexer);
+    printTokens(&lexer);
     return 0;
 }
-
-// main function
-int main()
-{
-    // Input 01
-    char lex_input[MAX_LENGTH] = "int a = b + c";
-    printf("For Expression \"%s\":\n", lex_input);
-    lexicalAnalyzer(lex_input);
-    printf(" \n");
-    // Input 02
-    char lex_input01[MAX_LENGTH]
-        = "if x > 5 {print(x)}";
-    printf("For Expression \"%s\":\n", lex_input01);
-    lexicalAnalyzer(lex_input01);
-    return (0);
-}
-
-// gotta make sure this all makes sense and improve it a bit
