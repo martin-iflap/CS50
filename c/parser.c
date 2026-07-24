@@ -14,8 +14,7 @@ typedef enum
     UnaryExpr,
     LiteralExpr,
     VariableExpr,
-    AssigmentExpr,
-    CallExpr,
+    AssignmentExpr,
 } ExpressionType;
 
 typedef struct Expression Expression;
@@ -28,7 +27,9 @@ struct Expression
     {
         struct
         {
-            Token value;
+            float number;
+            bool boolean;
+            char *string;
         } literal;
 
         struct
@@ -143,7 +144,7 @@ bool consume(Parser *parser, TokenType expected)
 {
     if(peek(parser).type != expected)
     {
-        printf("Expected token ...");
+        printf("Unexpected token, expected %i", expected);
         return false;
     }
 
@@ -152,8 +153,10 @@ bool consume(Parser *parser, TokenType expected)
 }
 
 // -----------------------------------------  PARSE EXPRESSIONS  --------------------------------------------
+Expression *parseExpression(Parser *parser);
 
 Expression *parsePrimary(Parser *parser)
+//parse primary expressions
 {
     Token t = peek(parser);
     Expression *exp = malloc(sizeof(Expression));
@@ -161,51 +164,91 @@ Expression *parsePrimary(Parser *parser)
     switch (t.type)
     {
     case TOKEN_NUMBER:
-        exp->literal.value = ; // get the value here somehow, gotta first fix the stupid ahh lexer and we'll get it
+        exp->type = LiteralExpr;
+        exp->literal.number = t.literal.number;
+        advance(parser);
         break;
 
     case TOKEN_STRING:
-    
+        exp->type = LiteralExpr;
+        exp->literal.string = t.literal.string;
+        advance(parser);
         break;
 
     case TOKEN_IDENTIFIER:
-    
+        exp->type = VariableExpr;
+        exp->variable.name = t; // check if this is the best way to store the identifier, perhaps just copy the lexeme
+        advance(parser);
         break;
 
-    case TOKEN_LBRACE:
+    case TOKEN_TRUE:
+        exp->type = LiteralExpr;
+        exp->literal.boolean = true;
+        advance(parser);
         break;
-    
+
+    case TOKEN_FALSE:
+        exp->type = LiteralExpr;
+        exp->literal.boolean = false;
+        advance(parser);
+        break;
+
+    // () expressions            
+    case TOKEN_LPAREN:
+        advance(parser);
+        exp = parseExpression(parser);
+        bool consumed = consume(parser, TOKEN_RPAREN);
+        if(!consumed) {
+            printf("Consume failed.");
+            exit(1);
+        }
+        break;
+
     default:
         break;
-
-    return exp;
     }
+    return exp;
 }
 
-parseUnary(Parser *parser)
+Expression *parseUnary(Parser *parser)
 {
-    Expression *left = parsePrimary(parser);
-    Token t = advance(parser);
-    if(t.type == TOKEN_MINUS);
+    Token t = peek(parser);
+    Expression *right = NULL;
+    if(t.type == TOKEN_MINUS || t.type == TOKEN_BANG || t.type == TOKEN_NOT) // I have to differentiate the minuses somehow otherwise minus is higher priority than multiplication
     {
+        Token op = t;
+        advance(parser);
 
+        Expression *sub_exp = parsePrimary(parser);
+        
+        Expression *exp = malloc(sizeof(Expression));
+        exp->type = UnaryExpr;
+        exp->unary.op = op;
+        exp->unary.operand = sub_exp;
+        right = exp;
     }
+    else
+    {
+        right = parsePrimary(parser);
+    }
+    return right;
 }
 
 Expression *parseMultiplication(Parser *parser)
 {
     Expression *left = parseUnary(parser);
-    Token next_token = advance(parser);
+    Token next_token = peek(parser);
 
     while(next_token.type == TOKEN_STAR || next_token.type == TOKEN_SLASH || next_token.type == TOKEN_PERCENT)
     {
-        Token operator = next_token; // not sure if this is exactly what we want
+        Token operator = next_token;
 
         next_token = advance(parser);
 
         Expression *right = parseUnary(parser);
 
         Expression *exp = malloc(sizeof(Expression)); // do i need to allocate the memory here?
+        exp->type = BinaryExpr;
         exp->binary.op = operator;
         exp->binary.left = left;
         exp->binary.right = right;
@@ -218,9 +261,9 @@ Expression *parseMultiplication(Parser *parser)
 Expression *parseAddition(Parser *parser)
 {
     Expression *left = parseMultiplication(parser);
-    Token next_token = advance(parser);
+    Token next_token = peek(parser);
 
-    while (next_token.type == TOKEN_PLUS || next_token.type == TOKEN_MINUS)
+    while(next_token.type == TOKEN_PLUS || next_token.type == TOKEN_MINUS)
     {
         Token operator = next_token;
 
@@ -228,7 +271,8 @@ Expression *parseAddition(Parser *parser)
 
         Expression *right = parseMultiplication(parser);
 
-        Expression *exp = malloc(sizeof(Expression)); // same problems as for multiplication
+        Expression *exp = malloc(sizeof(Expression)); // same as for multiplication
+        exp->type = BinaryExpr;
         exp->binary.op = operator;
         exp->binary.left = left;
         exp->binary.right = right;
@@ -241,32 +285,118 @@ Expression *parseAddition(Parser *parser)
 Expression *parseComparison(Parser *parser)
 {
     Expression *left = parseAddition(parser);
+    Token next_token = peek(parser);
+
+    while(
+        next_token.type == TOKEN_GREATER || next_token.type == TOKEN_LESS ||
+        next_token.type == TOKEN_GREATER_EQUAL || next_token.type == TOKEN_LESS_EQUAL
+    )
+    {
+        Token operator = next_token;
+
+        advance(parser);
+
+        Expression *right = parseAddition(parser);
+
+        Expression *exp = malloc(sizeof(Expression));
+        exp->type = BinaryExpr;
+        exp->binary.op = operator;
+        exp->binary.left = left;
+        exp->binary.right = right;
+
+        left = exp;
+    }
+    return left;
 }
 
 Expression *parseEquality(Parser *parser)
 {
     Expression *left = parseComparison(parser);
+    Token next_token = peek(parser);
+
+    while(next_token.type == TOKEN_EQUAL_EQUAL || next_token.type == TOKEN_BANG_EQUAL)
+    {
+        Token operator = next_token;
+
+        advance(parser);
+
+        Expression *right = parseComparison(parser);
+
+        Expression *exp = malloc(sizeof(Expression));
+        exp->type = BinaryExpr;
+        exp->binary.op = operator;
+        exp->binary.left = left;
+        exp->binary.right = right;
+
+        left = exp;
+    }
+    return left;
+}
+
+Expression *parseAndOr(Parser *parser)
+{
+    Expression *left = parseEquality(parser);
+    Token next_token = peek(parser);
+
+    while(next_token.type == TOKEN_AND || next_token.type == TOKEN_OR)
+    {
+        Token operator = next_token;
+
+        advance(parser);
+
+        Expression *right = parseEquality(parser);
+
+        Expression *exp = malloc(sizeof(Expression));
+        exp->type = BinaryExpr;
+        exp->binary.op = operator;
+        exp->binary.left = left;
+        exp->binary.right = right;
+
+        left = exp;
+    }
+    return left;
 }
 
 Expression *parseAssignment(Parser *parser)
 {
-    Expression *left = parseEquality(parser);
+    Expression *left = parseAndOr(parser);
+    Token token = peek(parser);
+
+    if(token.type == TOKEN_EQUAL) // convert to while perhaps?
+    {
+        Token operator = token;
+        advance(parser);
+        Expression *right = parseAndOr(parser);
+
+        Expression *exp = malloc(sizeof(Expression));
+        exp->type = AssignmentExpr;
+        exp->binary.op = operator;
+        exp->binary.left = left;
+        exp->binary.right = right;
+        
+        left = exp;
+    }
+    return left;
 }
 
 Expression *parseExpression(Parser *parser)
 {
     Expression *exp = parseAssignment(parser);
+    return exp;
 }
 
 // --------------------------------------------  PARSE BLOCK  --------------------------------------------
+Statement *parseStatement(Parser *parser, Program *program);
 
-Program *parseBlock(Parser *parser)
+Program *parseBlock(Parser *parser, Program *program)
 {
     // basically the same as parse program but stop when you see }
-    while(!match(parser, TOKEN_RBRACE))
+    // gotta create small program here to which i can add the statements and then return the small program ----------- important!!
+    while(!match(parser, TOKEN_RBRACE) && !isAtEnd(parser))
     {
-
+        parseStatement(parser, program);
     }
+    return program;
 }
 
 // --------------------------------------------  PARSE STATEMENTS  --------------------------------------------
@@ -286,8 +416,12 @@ Statement *parseIfWhileStatement(Parser *parser, Program *program, bool If)
     Expression *e = parseExpression(parser);
     stmt->whileIfStmt.condition = e;
 
-    consume(parser, TOKEN_LBRACE);
-    Program *p = parseBlock(parser);
+    bool consumed = consume(parser, TOKEN_LBRACE);
+    if(!consumed) {
+            printf("Consume failed.");
+            exit(1);
+    }
+    Program *p = parseBlock(parser, program);
     stmt->whileIfStmt.body = p;
 
     program->statements[program->statement_count++] = stmt;
@@ -298,7 +432,11 @@ Statement *parseIfWhileStatement(Parser *parser, Program *program, bool If)
 
 Statement *parsePrintStatement(Parser *parser, Program *program)
 {
-    consume(parser, TOKEN_LBRACKET);
+    bool consumed = consume(parser, TOKEN_LPAREN);
+    if(!consumed) {
+            printf("Consume failed.");
+            exit(1);
+    }
 
     Statement *stmt = malloc(sizeof(Statement));
 
@@ -352,7 +490,6 @@ Statement *parseStatement(Parser *parser, Program *program)
     }
 }
 
-
 // -------------------------------------------  PARSE PROGRAM  ------------------------------------------
 
 void parseProgram(Parser *parser, Program *program)
@@ -373,7 +510,15 @@ int main()
         .current = 0,
         .token_count = , // token count from lexer
     };
+
+    Program program = {.statement_count = 0};
+
+    parseProgram(&parser, &program);
 }
 
+
 // add better documentation to the code later
-// perhaps separate if and while stmts at some point later
+// perhaps separate if and while stmts and add else to if struct at some point later
+
+// whats the best way to store identifier in an Expression?
+// make sure statement types make sense
