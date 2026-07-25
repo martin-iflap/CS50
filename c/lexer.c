@@ -2,77 +2,10 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include "token.h"
 
 #define MAX_LENGTH 120
 #define MAX_TOKENS 128
-
-// -------------------------------------------  TOKEN DEFINITIONS  -------------------------------------------
-
-typedef enum
-{
-    /* Literals */
-    TOKEN_IDENTIFIER,
-    TOKEN_NUMBER,
-    TOKEN_STRING,
-
-    /* Keywords */
-    TOKEN_IF,
-    TOKEN_ELSE,
-    TOKEN_WHILE,
-    TOKEN_PRINT,
-
-    /* Arithmetic */
-    TOKEN_PLUS,
-    TOKEN_MINUS,
-    TOKEN_STAR,
-    TOKEN_SLASH,
-    TOKEN_PERCENT,
-
-    /* Assignment */
-    TOKEN_EQUAL,
-
-    /* Comparisons */
-    TOKEN_EQUAL_EQUAL,
-    TOKEN_BANG,
-    TOKEN_BANG_EQUAL,
-
-    TOKEN_GREATER,
-    TOKEN_GREATER_EQUAL,
-
-    TOKEN_LESS,
-    TOKEN_LESS_EQUAL,
-
-    /* Boolean operators (keywords later) */
-    TOKEN_AND,
-    TOKEN_OR,
-    TOKEN_NOT,
-
-    /* Brackets */
-    TOKEN_LPAREN,
-    TOKEN_RPAREN,
-
-    TOKEN_LBRACE,
-    TOKEN_RBRACE,
-
-    TOKEN_LBRACKET,
-    TOKEN_RBRACKET,
-
-    TOKEN_COMMA,
-    TOKEN_SEMICOLON,
-
-    TOKEN_UNKNOWN,
-    TOKEN_EOF
-
-} TokenType;
-
-// -----------------------------------------  TOKEN  ---------------------------------------------------
-
-typedef struct
-{
-    TokenType type;
-    const char *start; // pointer into the original source
-    int length; // number of characters
-} Token;
 
 // --------------------------------------  LEXER  --------------------------------------
 
@@ -106,24 +39,38 @@ char peekNext(Lexer *lexer)
 {
     if (isAtEnd(lexer))
         return '\0';
+
+    if (lexer->source[lexer->current + 1] == '\0')
+        return '\0';
+
     return lexer->source[lexer->current + 1];
 }
 
 // --------------------------------------  TOKEN CREATION --------------------------------------  
 
-void addToken(Lexer *lexer, TokenType type)
+Token *addToken(Lexer *lexer, TokenType type)
 {
     if (lexer->token_count >= MAX_TOKENS)
     {
         printf("Too many tokens.\n");
-        return;
+        return NULL;
     }
 
     Token *token = &lexer->tokens[lexer->token_count++];
 
     token->type = type;
-    token->start = lexer->source + lexer->start;
-    token->length = lexer->current - lexer->start;
+
+    memset(&token->literal, 0, sizeof(token->literal));
+
+    int len = lexer->current - lexer->start;
+    if (len >= sizeof(token->lexeme))
+    {
+        len = sizeof(token->lexeme) - 1;
+    }
+
+    memcpy(token->lexeme, lexer->source + lexer->start, len);
+    token->lexeme[len] = '\0';
+    return token;
 }
 
 // --------------------------------------  KEYWORDS  ----------------------------------------------------
@@ -151,6 +98,15 @@ TokenType keywordType(const char *text, int length)
     if (length == 3 && strncmp(text, "not", 3) == 0)
         return TOKEN_NOT;
 
+    if (length == 4 && strncmp(text, "True", 4) == 0)
+        return TOKEN_TRUE;
+
+    if (length == 5 && strncmp(text, "False", 5) == 0)
+        return TOKEN_FALSE;
+
+    if (length == 6 && strncmp(text, "return", 6) == 0)
+        return TOKEN_RETURN;
+
     return TOKEN_IDENTIFIER;
 }
 
@@ -167,7 +123,19 @@ void scanIdentifier(Lexer *lexer)
             lexer->source + lexer->start,
             lexer->current - lexer->start);
 
-    addToken(lexer, type);
+    Token *token = addToken(lexer, type);
+    
+    if (!token)
+        return;
+
+    if(type == TOKEN_TRUE)
+    {
+        token->literal.boolean = true;
+    }
+    else if(type == TOKEN_FALSE)
+    {
+        token->literal.boolean = false;
+    }
 }
 
 // --------------------------------------  SCAN NUMBER  -----------------------------------------
@@ -187,7 +155,10 @@ void scanNumber(Lexer *lexer)
             advance(lexer);
         }
     }
-    addToken(lexer, TOKEN_NUMBER);
+    Token *token = addToken(lexer, TOKEN_NUMBER);
+    if (!token)
+        return;
+    token->literal.number = strtof(token->lexeme, NULL);
 }
 
 // --------------------------------------  SCAN ONE TOKEN  ---------------------------------------------
@@ -195,13 +166,18 @@ void scanNumber(Lexer *lexer)
 void scanToken(Lexer *lexer)
 {
     char c = advance(lexer);
+
     switch (c)
     {
         /* Ignore whitespace */
         case ' ':
         case '\r':
         case '\t':
+            break;
+
+        /* Newline */
         case '\n':
+            addToken(lexer, TOKEN_NEWLINE);
             break;
 
         /* Single-character tokens */
@@ -309,10 +285,16 @@ void scanToken(Lexer *lexer)
         /* String literal */
         case '"':
         case '\'':
-            char quoteChar = lexer->source[lexer->current - 1];
+        {
+            char quoteChar = c;
             
             while (!isAtEnd(lexer) && peek(lexer) != quoteChar)
             {
+                if (peek(lexer) == '\n')
+                {
+                    printf("Lexer Error: Newline in string literal.\n");
+                    return;
+                }
                 advance(lexer);
             }
 
@@ -322,9 +304,16 @@ void scanToken(Lexer *lexer)
                 return;
             }
             advance(lexer);
-            addToken(lexer, TOKEN_STRING);
+            Token *token = addToken(lexer, TOKEN_STRING);    
+            if (!token)
+                return;
+
+            int clean_len = strlen(token->lexeme) - 2;
+            token->lexeme[clean_len + 1] = '\0';
+            token->literal.string = token->lexeme + 1;
 
             break;
+        }
 
         default:
             if (isdigit(c))
@@ -373,6 +362,9 @@ const char *tokenName(TokenType type)
         case TOKEN_WHILE:           return "WHILE";
         case TOKEN_PRINT:           return "PRINT";
 
+        case TOKEN_TRUE:            return "TRUE";
+        case TOKEN_FALSE:           return "FALSE";
+
         case TOKEN_AND:             return "AND";
         case TOKEN_OR:              return "OR";
         case TOKEN_NOT:             return "NOT";
@@ -409,6 +401,7 @@ const char *tokenName(TokenType type)
 
         case TOKEN_UNKNOWN:         return "UNKNOWN";
         case TOKEN_EOF:             return "EOF";
+        case TOKEN_NEWLINE:         return "NEWLINE";
     }
 
     return "INVALID";
@@ -422,10 +415,9 @@ void printTokens(Lexer *lexer)
     {
         Token *token = &lexer->tokens[i];
 
-        printf("%-18s  ->  \"%.*s\"\n",
-               tokenName(token->type),
-               token->length,
-               token->start);
+        printf("%-18s -> \"%s\"\n",
+            tokenName(token->type),
+            token->lexeme);
     }
 }
 
@@ -434,7 +426,8 @@ void printTokens(Lexer *lexer)
 int main(void)
 {
     char source[MAX_LENGTH] =
-        "if x > 5 {print('x is greater')} else {print('x is smaller')}";
+        "if x > 5 \n"
+        "else \n";
 
     Lexer lexer =
     {
@@ -447,3 +440,17 @@ int main(void)
     printTokens(&lexer);
     return 0;
 }
+
+
+// PROGRAM EXAMPLE:
+//  x = 5
+//  y = 4 * 3 / (2 - 4 + 5) + 2
+//  z = x - y
+//  if z > x {
+//    while z > x {
+//      print("z is still greater than x!")
+//    }
+//  }
+//  else {
+//    print("x is greater than z!")
+//  }
