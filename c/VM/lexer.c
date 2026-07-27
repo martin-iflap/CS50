@@ -2,6 +2,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+
 #include "token.h"
 
 #define MAX_LENGTH 120
@@ -20,22 +22,26 @@ typedef struct
 
 // --------------------------------------  BASIC HELPERS  --------------------------------------
 
-bool isAtEnd(Lexer *lexer)
+static bool isAtEnd(Lexer *lexer)
+// check if current is at end of source
 {
     return lexer->source[lexer->current] == '\0';
 }
 
-char advance(Lexer *lexer)
+static char advance(Lexer *lexer)
+// return current char from source and advance current + 1
 {
     return lexer->source[lexer->current++];
 }
 
-char peek(Lexer *lexer)
+static char peek(Lexer *lexer)
+// return the current char from source
 {
     return lexer->source[lexer->current];
 }
 
-char peekNext(Lexer *lexer)
+static char peekNext(Lexer *lexer)
+// peek at the next token after current and make sure its not the end
 {
     if (isAtEnd(lexer))
         return '\0';
@@ -49,6 +55,7 @@ char peekNext(Lexer *lexer)
 // --------------------------------------  TOKEN CREATION --------------------------------------  
 
 Token *addToken(Lexer *lexer, TokenType type)
+// add token to the tokens array and increment token count
 {
     if (lexer->token_count >= MAX_TOKENS)
     {
@@ -60,7 +67,7 @@ Token *addToken(Lexer *lexer, TokenType type)
 
     token->type = type;
 
-    memset(&token->literal, 0, sizeof(token->literal));
+    memset(&token->literal, 0, sizeof(token->literal)); // initialize all fields to 0s
 
     int len = lexer->current - lexer->start;
     if (len >= sizeof(token->lexeme))
@@ -68,7 +75,7 @@ Token *addToken(Lexer *lexer, TokenType type)
         len = sizeof(token->lexeme) - 1;
     }
 
-    memcpy(token->lexeme, lexer->source + lexer->start, len);
+    memcpy(token->lexeme, lexer->source + lexer->start, len); // copy token text to lexeme
     token->lexeme[len] = '\0';
     return token;
 }
@@ -76,6 +83,8 @@ Token *addToken(Lexer *lexer, TokenType type)
 // --------------------------------------  KEYWORDS  ----------------------------------------------------
 
 TokenType keywordType(const char *text, int length)
+// check if text is a keyword and return correct token type
+// default is that the token text is an identifier.
 {
     if (length == 2 && strncmp(text, "if", 2) == 0)
         return TOKEN_IF;
@@ -113,6 +122,7 @@ TokenType keywordType(const char *text, int length)
 // --------------------------------------  SCAN IDENTIFIER  ------------------------------------------
 
 void scanIdentifier(Lexer *lexer)
+// get the token type from keyword type function and add token accordingly
 {
     while (isalnum(peek(lexer)) || peek(lexer) == '_')
     {
@@ -141,6 +151,7 @@ void scanIdentifier(Lexer *lexer)
 // --------------------------------------  SCAN NUMBER  -----------------------------------------
 
 void scanNumber(Lexer *lexer)
+// scan numbers, create TOKEN_NUMBER and add it
 {
     while (isdigit(peek(lexer)))
     {
@@ -164,6 +175,7 @@ void scanNumber(Lexer *lexer)
 // --------------------------------------  SCAN ONE TOKEN  ---------------------------------------------
 
 void scanToken(Lexer *lexer)
+// scan the current token and process it
 {
     char c = advance(lexer);
 
@@ -336,6 +348,7 @@ void scanToken(Lexer *lexer)
 // --------------------------------------  LEXICAL ANALYZER  ----------------------------------------
 
 void lexicalAnalyzer(Lexer *lexer)
+// run scanToken until the end of the file
 {
     while (!isAtEnd(lexer))
     {
@@ -350,6 +363,7 @@ void lexicalAnalyzer(Lexer *lexer)
 // --------------------------------------  DEBUG  ----------------------------------------------------
 
 const char *tokenName(TokenType type)
+// return the string name of the provided token type
 {
     switch (type)
     {
@@ -408,6 +422,7 @@ const char *tokenName(TokenType type)
 }
 
 void printTokens(Lexer *lexer)
+// print the tokens currently in tokens array
 {
     printf("\n========== TOKENS ==========\n\n");
 
@@ -421,9 +436,44 @@ void printTokens(Lexer *lexer)
     }
 }
 
+// --------------------------------------------  LEX  --------------------------------------------------
+
+int lex(Token out_tokens[MAX_TOKENS])
+// endpoint function for parser to access the lexer and get the output as its input
+{
+    const char *source =
+        "x = 5\n"
+        "y = 4 * 3 / (2 - 4 + 5) + 2\n"
+        "z = x - y\n"
+        "if z > x {\n"
+        "  while z > x {\n"
+        "    print(\"z is still greater than x!\")\n"
+        "  }\n"
+        "}\n"
+        "else {\n"
+        "  print(\"x is greater than z!\")\n"
+        "}\n";
+
+    Lexer lexer = {
+        .source = source,
+        .start = 0,
+        .current = 0,
+        .token_count = 0
+    };
+
+    lexicalAnalyzer(&lexer);
+
+    memcpy(out_tokens, lexer.tokens, lexer.token_count * sizeof(Token));
+
+    printTokens(&lexer);
+    
+    return lexer.token_count;
+}
+
 // --------------------------------------  MAIN  ------------------------------------------------------
 
-int main(void)
+int main_lexer(void)
+// main function to run the lexer alone, currently renamed to avoid collision with parsers main function
 {
     char source[MAX_LENGTH] =
         "if x > 5 \n"
@@ -454,3 +504,7 @@ int main(void)
 //  else {
 //    print("x is greater than z!")
 //  }
+
+
+// fetch the source from a file later, rn it's a string in lex().
+// which functions need to be static?
