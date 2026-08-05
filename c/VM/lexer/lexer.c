@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "token.h"
+#include "../token.h"
 
 #define MAX_LENGTH 120
 #define MAX_TOKENS 128
@@ -438,22 +438,9 @@ void printTokens(Lexer *lexer)
 
 // --------------------------------------------  LEX  --------------------------------------------------
 
-int lex(Token out_tokens[MAX_TOKENS])
+void lex(const char *source, Token out_tokens[MAX_TOKENS])
 // endpoint function for parser to access the lexer and get the output as its input
 {
-    const char *source =
-        "x = 5\n"
-        "y = 4 * 3 / (2 - 4 + 5) + 2\n"
-        "z = x - y\n"
-        "if z > x {\n"
-        "  while z > x {\n"
-        "    print(\"z is still greater than x!\")\n"
-        "  }\n"
-        "}\n"
-        "else {\n"
-        "  print(\"x is greater than z!\")\n"
-        "}\n";
-
     Lexer lexer = {
         .source = source,
         .start = 0,
@@ -466,8 +453,6 @@ int lex(Token out_tokens[MAX_TOKENS])
     memcpy(out_tokens, lexer.tokens, lexer.token_count * sizeof(Token));
 
     printTokens(&lexer);
-    
-    return lexer.token_count;
 }
 
 // --------------------------------------  MAIN  ------------------------------------------------------
@@ -492,19 +477,7 @@ int main_lexer(void)
 }
 
 
-// PROGRAM EXAMPLE:
-//  x = 5
-//  y = 4 * 3 / (2 - 4 + 5) + 2
-//  z = x - y
-//  if z > x {
-//    while z > x {
-//      print("z is still greater than x!")
-//    }
-//  }
-//  else {
-//    print("x is greater than z!")
-//  }
-
 
 // fetch the source from a file later, rn it's a string in lex().
 // which functions need to be static?
+// update print to not do newline on newline

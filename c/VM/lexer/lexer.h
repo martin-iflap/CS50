@@ -1,14 +1,14 @@
 #ifndef LEXER_H
 #define LEXER_H
 
-#include "token.h"
+#include "../token.h"
 
 #define MAX_TOKENS 128
 
 
 // Runs the lexer over source and writes up to MAX_TOKENS tokens into out_tokens.
 // Returns the number of tokens written, or -1 on error.
-int lex(Token out_tokens[MAX_TOKENS]);
+void lex(const char *source, Token out_tokens[MAX_TOKENS]);
 
 
 

@@ -5,30 +5,8 @@
 #include <stdlib.h>
 
 #include "../parser/parser.h"
-#include "../vm.h"
-
-#define MAX_CODE 100
-#define MAX_VARS 64
-
-// ---------------------------------------  CHUNK, SYMBOLS, COMPILER  --------------------------------------------
-
-typedef struct
-{
-    Instruction code[MAX_CODE];
-    int count;
-} Chunk;
-
-typedef struct
-{
-    char *names[MAX_VARS];
-    int count;
-} SymbolTable;
-
-typedef struct
-{
-    Chunk chunk;
-    SymbolTable symbols;
-} Compiler;
+#include "../vm/vm.h"
+#include "compiler.h"
 
 // -----------------------  FWD DECLS  -----------------------------
 static void compileExpression(Compiler *compiler, Expression *exp);
@@ -139,7 +117,7 @@ static int emitJumpPlaceholder(Compiler *compiler, InstructionSet op)
 // current end (i.e. "jump to right here").
 static void patchJumpToHere(Compiler *compiler, int jumpIndex)
 {
-    compiler->chunk.code[jumpIndex].operand.offset = compiler->chunk.count - jumpIndex;
+    compiler->chunk.code[jumpIndex].operand.offset = compiler->chunk.count - jumpIndex - 1; // added -1 to ensure all numbers match
 }
 
 // ----------------------------------------  TOKEN -> OPCODE  -----------------------------------------
@@ -307,23 +285,140 @@ static void compileProgram(Compiler *compiler, Program *program)
     }
 }
 
-// -----------------------------------------------  MAIN  ----------------------------------------------
+// --------------------------------------------  COMPILE  ----------------------------------------------
+void printCode(const Instruction program[], int instruction_count); // fwd decl
 
-int main(void)
+int compile(const char *source, Instruction *out_code)
 {
     Compiler compiler = {
         .chunk = {.count = 0},
         .symbols = {.count = 0}
     };
 
-    Program program = {.statement_count = 0}; // placeholder — real output from the parser goes here
+    Program program;
+    Arena *arena;
+    parse(source, &program, &arena);
 
-    compileProgram(&compiler, &program);
-
+    compileProgram(&compiler, &program); // check this function probably
     emitSimple(&compiler, HLT);
 
-    return 0;
+    memcpy(out_code, compiler.chunk.code, compiler.chunk.count * sizeof(Instruction));
+    int count = compiler.chunk.count;
+
+    printCode(out_code, count);
+
+    arena_destroy(arena);
+    return count;
+}
+
+// -----------------------------------------------  MAIN  ----------------------------------------------
+
+int compiler_main(void)
+{
+    // almost the same as compile just make it work on its own
 }
 
 // fix the vm and probably just go over the file and look for stuff that needs to be added or fixed
 // then we need to make sure all the modules are compatible and that the whole thing looks good
+
+
+// --------------------------------------------  PRINT  ---------------------------------------------
+
+const char *instructionName(InstructionSet opcode)
+{
+    switch (opcode)
+    {
+        case PSH: return "PSH";
+        case ADD: return "ADD";
+        case SBT: return "SBT";
+        case POP: return "POP";
+        case MLTP: return "MLTP";
+        case DVD: return "DVD";
+        case SQRT: return "SQRT";
+        case SIN: return "SIN";
+        case COS: return "COS";
+        case MOD: return "MOD";
+        case ABS: return "ABS";
+        case NEG: return "NEG";
+
+        case EQ: return "EQ";
+        case NEQ: return "NEQ";
+        case LT: return "LT";
+        case GT: return "GT";
+        case LTE: return "LTE";
+        case GTE: return "GTE";
+
+        case AND: return "AND";
+        case OR: return "OR";
+        case NOT: return "NOT";
+
+        case JMP: return "JMP";
+        case JMP_IF_FALSE: return "JMP_IF_FALSE";
+
+        case STORE: return "STORE";
+        case LOAD: return "LOAD";
+
+        case RETURN: return "RETURN";
+        case CALL: return "CALL";
+
+        case PRINT: return "PRINT";
+        case HLT: return "HLT";
+    }
+
+    return "UNKNOWN";
+}
+
+void printOperand(const Instruction *instruction)
+{
+    if (!instruction->has_operand)
+        return;
+
+    switch (instruction->operand_type)
+    {
+        case OPERAND_NUMBER:
+            printf("%.2f", instruction->operand.number);
+            break;
+
+        case OPERAND_BOOLEAN:
+            printf("%s",
+                   instruction->operand.boolean ? "true" : "false");
+            break;
+
+        case OPERAND_STRING:
+            printf("\"%s\"", instruction->operand.string);
+            break;
+
+        case OPERAND_SLOT:
+            printf("slot %d", instruction->operand.slot);
+            break;
+
+        case OPERAND_JUMP:
+            printf("%+d", instruction->operand.offset);
+            break;
+
+        default:
+            printf("<?>");
+    }
+}
+
+void printCode(const Instruction program[], int instruction_count)
+{
+    printf("\n========== BYTECODE ==========\n\n");
+
+    for (int i = 0; i < instruction_count; i++)
+    {
+        printf("%03d: %-15s",
+               i,
+               instructionName(program[i].opcode));
+
+        if (program[i].has_operand)
+        {
+            printf(" ");
+            printOperand(&program[i]);
+        }
+
+        printf("\n");
+    }
+
+    printf("\n==============================\n");
+}

@@ -1,106 +1,14 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <math.h>
+#include <stdlib.h>
 
-#define STACK_SIZE 256
-#define MEM_SIZE 256
-
-
-// -------------------  Runtime values  ----------------------
-
-typedef enum {
-    NUMBER,
-    BOOLEAN,
-    STRING
-} ValueType;
-
-typedef struct {
-    ValueType type;
-
-    union {
-        float number;
-        bool boolean;
-        char *string;
-    } value;
-} Value;
-
-// ---------------------------  Instruction set  -------------------------
-
-typedef enum {
-   PSH,     // push
-   ADD,     // add 2 top numbers
-   SBT,     // subtract top 2 numbers
-   POP,     // pop
-   MLTP,    // multiply 2 top numbers
-   DVD,     // divide 2 top numbers
-   SQRT,    // square root of top number
-   SIN,     // sin of top number in radians
-   COS,     // cos of top number in radians
-   MOD,     // modulo
-   ABS,     // absolute value
-
-   EQ,      // equal
-   NEQ,     // not equal
-   LT,      // less than
-   GT,      // greater than
-   LTE,     // less than or equal
-   GTE,     // greater than or equal
-
-   AND,
-   OR,
-   NOT,
-
-   JMP, // jump by
-   JMP_IF_FALSE, // jump by if false
-
-   STORE,
-   LOAD,
-
-   RETURN, // maybe add these later but we'll see
-   CALL,
-
-   HLT      // halt
-
-} InstructionSet;
-
-// -------------------------------  Instructions  ---------------------------
-// The future compiler will generate these automatically.
-typedef enum {
-    OPERAND_NONE,
-    OPERAND_NUMBER,
-    OPERAND_BOOLEAN,
-    OPERAND_STRING,
-    OPERAND_SLOT,
-    OPERAND_JUMP
-} OperandType;
-
-typedef struct {
-    InstructionSet opcode;
-    bool has_operand;
-    OperandType operand_type;
-    union {
-        float number;
-        bool boolean;
-        char *string;
-        int slot; // slot for memory
-        int offset; // offset for jumps
-    } operand;
-} Instruction;
-
-// --------------------------  Virtual Machine  ------------------------------
-
-typedef struct {
-    bool running;
-    int ip;     // instruction pointer
-    int sp;     // stack pointer
-
-    Value stack[STACK_SIZE]; // stack
-    Value memory[MEM_SIZE]; // memory array
-} VM;
+#include "vm.h"
+#include "../compiler/compiler.h"
 
 // ----------------------------  Program  -----------------------------
 
-Instruction program[] = {
+Instruction test_program[] = {
     {.opcode = PSH, .has_operand = true, .operand_type = OPERAND_NUMBER, .operand.number = 0},
     {.opcode = COS},
     {.opcode = POP}, // = 1.00
@@ -150,7 +58,7 @@ Instruction program[] = {
 
 // ---------------------------------  Fetch  --------------------------------
 
-Instruction fetch(VM *vm)
+Instruction fetch(Instruction *program, VM *vm)
 {
     return program[vm->ip];
 }
@@ -296,17 +204,17 @@ void print_value(Value value)
 }
 
 // ----------------------------------  Evaluation  -----------------------------
-// Execute one instruction.
-// The VM receives an instruction and modifies its state.
 
 void eval(Instruction instruction, VM *vm)
+// Execute one instruction.
 {
     switch(instruction.opcode)
     {
+        case RETURN:
         case HLT:
         {
             vm->running = false;
-            printf("done\n");
+            printf("Process finished with exit code 0.\n");
             break;
         }
         case PSH:
@@ -428,13 +336,25 @@ void eval(Instruction instruction, VM *vm)
         }
         case MOD:
         {
-            // Currently only supports integer modulo.
-            // Later we can add proper integer values.
-            float a = pop_number(vm);
-            int modulo = instruction.operand.number;
-            int result = ((int)a) % modulo;
+            float b = pop_number(vm); // The modulo
+            float a = pop_number(vm); // The dividend
 
-            push_number(vm, result);
+            if ((int)b == 0) {
+                printf("Zero division Error in modulo operation.");
+                exit(1);
+            }
+
+            // Mathematical modulo formula that handles negative numbers correctly
+            int result = ((int)a % (int)b + (int)b) % (int)b;
+
+            push_number(vm, (float)result);
+            break;
+        }
+        case NEG:
+        {
+            float a = pop_number(vm);
+            push_number(vm, -a);
+
             break;
         }
         // ------------------ Comparisons -----------------
@@ -579,6 +499,13 @@ void eval(Instruction instruction, VM *vm)
             push_value(vm, fetched);
             break;
         }
+        // ----------------- Print ------------------
+        case PRINT:
+        {
+            Value value = pop(vm);
+            print_value(value);
+            break;
+        }
         default:
         {
             printf(
@@ -594,21 +521,46 @@ void eval(Instruction instruction, VM *vm)
 
 // -------------------------------------  Main  -------------------------------------
 
-int main()
+int main(void)
 {
+    const char *source =
+        "x = 5\n"
+        "y = 4 * 3 / (2 - 4 + 5) + 2\n"
+        "z = x - y\n"
+        "if z > x {\n"
+        "  while z > x {\n"
+        "    print(\"z is still greater than x!\")\n"
+        "  }\n"
+        "}\n"
+        "else {\n"
+        "  print(\"x is greater than z!\")\n"
+        "}\n";
+
+    const char *t_source = 
+        "x = 3 + 2\n"
+        "if x == 5 {"
+            "print(x)\n"
+        "}";
+
+
+    Instruction out_instruct[MAX_CODE];
+    int code_count = compile(source, out_instruct); // vm doesnt have code count at the moment
+
     VM vm = {
         .running = true,
         .ip = 0,
-        .sp = -1
+        .sp = -1,
     };
 
-    while(vm.running)
+    while (vm.running)
     {
-        Instruction instruction = fetch(&vm);
+        Instruction instruction = fetch(out_instruct, &vm);
         eval(instruction, &vm);
-        // Move to next instruction.
-        // Later jump instructions will modify this.
         vm.ip++;
     }
     return 0;
 }
+
+
+// don't forget that jumping by 6 means incrementing ip by 7 rn, since main loop does +1. we'll look at that later
+// check if the modulo is now better and then just make sure compiler and vm are compatible and fix the rest of the mistakes.
