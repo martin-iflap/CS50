@@ -52,6 +52,16 @@ static char peekNext(Lexer *lexer)
     return lexer->source[lexer->current + 1];
 }
 
+void consumeComment(Lexer *lexer)
+// consume the entire comment
+{
+    char c = advance(lexer);
+    while(c != '\n' && !isAtEnd(lexer))
+    {
+        c = advance(lexer);
+    }
+}
+
 // --------------------------------------  TOKEN CREATION --------------------------------------  
 
 Token *addToken(Lexer *lexer, TokenType type)
@@ -244,6 +254,16 @@ void scanToken(Lexer *lexer)
         case '%':
             addToken(lexer, TOKEN_PERCENT);
             break;
+        case '#':
+        {
+            consumeComment(lexer);
+            if (!isAtEnd(lexer) || lexer->source[lexer->current - 1] == '\n')
+            {
+                lexer->start = lexer->current - 1;
+                addToken(lexer, TOKEN_NEWLINE);
+            }
+            break;
+        }
 
         /* Two-character operators */
         case '=':
@@ -421,7 +441,7 @@ const char *tokenName(TokenType type)
     return "INVALID";
 }
 
-void printTokens(Lexer *lexer)
+const void printTokens(Lexer *lexer)
 // print the tokens currently in tokens array
 {
     printf("\n========== TOKENS ==========\n\n");
@@ -430,9 +450,16 @@ void printTokens(Lexer *lexer)
     {
         Token *token = &lexer->tokens[i];
 
-        printf("%-18s -> \"%s\"\n",
-            tokenName(token->type),
-            token->lexeme);
+        if(token->type == TOKEN_NEWLINE)
+        {
+            printf("TOKEN_NEWLINE      -> \" \"\n");
+        }
+        else
+        {
+            printf("%-18s -> \"%s\"\n",
+                tokenName(token->type),
+                token->lexeme);
+        }
     }
 }
 
@@ -476,8 +503,4 @@ int main_lexer(void)
     return 0;
 }
 
-
-
-// fetch the source from a file later, rn it's a string in lex().
 // which functions need to be static?
-// update print to not do newline on newline
