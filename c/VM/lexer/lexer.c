@@ -6,8 +6,6 @@
 
 #include "../token.h"
 
-#define MAX_LENGTH 120
-#define MAX_TOKENS 128
 
 // --------------------------------------  LEXER  --------------------------------------
 
@@ -16,7 +14,8 @@ typedef struct
     const char *source;
     int start;
     int current;
-    Token tokens[MAX_TOKENS];
+    Token *tokens;
+    int tokens_capacity;
     int token_count;
 } Lexer;
 
@@ -52,7 +51,7 @@ static char peekNext(Lexer *lexer)
     return lexer->source[lexer->current + 1];
 }
 
-void consumeComment(Lexer *lexer)
+static void consumeComment(Lexer *lexer)
 // consume the entire comment
 {
     char c = advance(lexer);
@@ -64,13 +63,13 @@ void consumeComment(Lexer *lexer)
 
 // --------------------------------------  TOKEN CREATION --------------------------------------  
 
-Token *addToken(Lexer *lexer, TokenType type)
+static Token *addToken(Lexer *lexer, TokenType type)
 // add token to the tokens array and increment token count
 {
-    if (lexer->token_count >= MAX_TOKENS)
+    if(lexer->token_count >= lexer->tokens_capacity) // double the capacity if needed
     {
-        printf("Too many tokens.\n");
-        return NULL;
+        lexer->tokens_capacity *= 2;
+        lexer->tokens = realloc(lexer->tokens, lexer->tokens_capacity * sizeof(Token));
     }
 
     Token *token = &lexer->tokens[lexer->token_count++];
@@ -340,10 +339,6 @@ void scanToken(Lexer *lexer)
             if (!token)
                 return;
 
-            int clean_len = strlen(token->lexeme) - 2;
-            token->lexeme[clean_len + 1] = '\0';
-            token->literal.string = token->lexeme + 1;
-
             break;
         }
 
@@ -378,6 +373,17 @@ void lexicalAnalyzer(Lexer *lexer)
     }
     lexer->start = lexer->current;
     addToken(lexer, TOKEN_EOF);
+
+    for (int i = 0; i < lexer->token_count; i++)
+    {
+        Token *token = &lexer->tokens[i];
+        if (token->type == TOKEN_STRING)
+        {
+            int clean_len = strlen(token->lexeme) - 2;
+            token->lexeme[clean_len + 1] = '\0';
+            token->literal.string = token->lexeme + 1;
+        }
+    }
 }
 
 // --------------------------------------  DEBUG  ----------------------------------------------------
@@ -465,19 +471,21 @@ const void printTokens(Lexer *lexer)
 
 // --------------------------------------------  LEX  --------------------------------------------------
 
-void lex(const char *source, Token out_tokens[MAX_TOKENS])
+void lex(const char *source, Token **out_tokens, int init_capacity)
 // endpoint function for parser to access the lexer and get the output as its input
 {
     Lexer lexer = {
         .source = source,
         .start = 0,
         .current = 0,
+        .tokens = malloc(init_capacity*sizeof(Token)), // initialize the tokens
+        .tokens_capacity = init_capacity,
         .token_count = 0
     };
 
     lexicalAnalyzer(&lexer);
 
-    memcpy(out_tokens, lexer.tokens, lexer.token_count * sizeof(Token));
+    *out_tokens = lexer.tokens;
 
     printTokens(&lexer);
 }
@@ -487,7 +495,7 @@ void lex(const char *source, Token out_tokens[MAX_TOKENS])
 int main_lexer(void)
 // main function to run the lexer alone, currently renamed to avoid collision with parsers main function
 {
-    char source[MAX_LENGTH] =
+    char *source =
         "if x > 5 \n"
         "else \n";
 
@@ -496,11 +504,12 @@ int main_lexer(void)
         .source = source,
         .start = 0,
         .current = 0,
+        .tokens = malloc(128*sizeof(Token)), // initialize the tokens
+        .tokens_capacity = 128,
         .token_count = 0
     };
     lexicalAnalyzer(&lexer);
     printTokens(&lexer);
+    free(lexer.tokens);
     return 0;
 }
-
-// which functions need to be static?

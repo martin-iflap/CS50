@@ -6,6 +6,10 @@
 #include "vm.h"
 #include "../compiler/compiler.h"
 
+#define INIT_STACK_SIZE 256
+#define INIT_MEMORY_SIZE 256
+
+
 // ----------------------------  Program  -----------------------------
 
 Instruction test_program[] = {
@@ -60,6 +64,12 @@ Instruction test_program[] = {
 
 Instruction fetch(Instruction *program, VM *vm)
 {
+    if (vm->ip < 0 || vm->ip >= vm->code_count)
+    {
+        printf("Instruction pointer out of bounds: %d\n", vm->ip);
+        vm->running = false;
+        return (Instruction){.opcode = HLT, .has_operand = false};
+    }
     return program[vm->ip];
 }
 
@@ -67,11 +77,10 @@ Instruction fetch(Instruction *program, VM *vm)
 
 void push_number(VM *vm, float number)
 {
-    if(vm->sp >= STACK_SIZE - 1)
+    if(vm->sp >= vm->stack_capacity - 1)
     {
-        printf("Stack overflow.\n");
-        vm->running = false;
-        return;
+        vm->stack_capacity *= 2;
+        vm->stack = realloc(vm->stack, vm->stack_capacity * sizeof(Value));
     }
 
     vm->sp++;
@@ -81,11 +90,10 @@ void push_number(VM *vm, float number)
 
 void push_bool(VM *vm, bool boolean)
 {
-    if(vm->sp >= STACK_SIZE - 1)
+    if(vm->sp >= vm->stack_capacity - 1)
     {
-        printf("Stack overflow.\n");
-        vm->running = false;
-        return;
+        vm->stack_capacity *= 2;
+        vm->stack = realloc(vm->stack, vm->stack_capacity * sizeof(Value));
     }
 
     vm->sp++;
@@ -95,11 +103,10 @@ void push_bool(VM *vm, bool boolean)
 
 void push_string(VM *vm, char *string)
 {
-    if(vm->sp >= STACK_SIZE - 1)
+    if(vm->sp >= vm->stack_capacity - 1)
     {
-        printf("Stack overflow.\n");
-        vm->running = false;
-        return;
+        vm->stack_capacity *= 2;
+        vm->stack = realloc(vm->stack, vm->stack_capacity * sizeof(Value));
     }
 
     vm->sp++;
@@ -109,12 +116,12 @@ void push_string(VM *vm, char *string)
 
 void push_value(VM *vm, Value value)
 {
-    if(vm->sp >= STACK_SIZE - 1)
-        {
-            printf("Stack overflow.\n");
-            vm->running = false;
-            return;
-        }
+    if(vm->sp >= vm->stack_capacity - 1)
+    {
+        vm->stack_capacity *= 2;
+        vm->stack = realloc(vm->stack, vm->stack_capacity * sizeof(Value));
+    }
+
     vm->stack[++vm->sp] = value;
 }
 // ----------------------------------  Stack pop functions  --------------------------------
@@ -468,11 +475,16 @@ void eval(Instruction instruction, VM *vm)
             }
 
             int index = (int)instruction.operand.slot;
-            if(index < 0 || index >= MEM_SIZE)
+            if(index < 0)
             {
-                printf("Memory index out of bounds.\n");
+                printf("Memory index cannot be negative.\n");
                 vm->running = false;
                 break;
+            }
+            while(index >= vm->memory_capacity)
+            {
+                vm->memory_capacity *= 2;
+                vm->memory = realloc(vm->memory, vm->memory_capacity * sizeof(Value));
             }
 
             vm->memory[index] = pop(vm);
@@ -488,9 +500,9 @@ void eval(Instruction instruction, VM *vm)
             }
 
             int index = (int)instruction.operand.slot;
-            if(index < 0 || index >= MEM_SIZE)
+            if(index < 0)
             {
-                printf("Memory index out of bounds.\n");
+                printf("Memory index cannot be negative.\n");
                 vm->running = false;
                 break;
             }
@@ -519,9 +531,57 @@ void eval(Instruction instruction, VM *vm)
     }
 }
 
+// ---------------------------------  Free String Memory  -------------------------
+
+void freeStringOperands(Instruction *instruction_array, int code_count)
+{
+    for(int i=0; i < code_count; i++)
+    {
+        Instruction *instruction = &instruction_array[i];
+        if(instruction->operand_type == OPERAND_STRING)
+        {
+            free(instruction->operand.string);
+        }
+    }
+}
+
+// ----------------------------------  Run VM  -------------------------------------
+
+int runVM(const char *source)
+{
+    Instruction *out_instruct;
+    int code_count = compile(source, &out_instruct);
+
+    VM vm = {
+        .running = true,
+        .ip = 0,
+        .sp = -1,
+        .code_count = code_count,
+
+        .stack = malloc(INIT_STACK_SIZE * sizeof(Value)),
+        .stack_capacity = INIT_STACK_SIZE,
+        .memory = malloc(INIT_MEMORY_SIZE * sizeof(Value)),
+        .memory_capacity = INIT_MEMORY_SIZE,
+    };
+
+    while (vm.running)
+    {
+        Instruction instruction = fetch(out_instruct, &vm);
+        eval(instruction, &vm);
+        vm.ip++;
+    }
+
+    // free all the allocated memory
+    freeStringOperands(out_instruct, code_count);
+    free(out_instruct);
+    free(vm.memory);
+    free(vm.stack);
+    return 0;
+}
+
 // -------------------------------------  Main  -------------------------------------
 
-int main(void)
+int vm_main(void)
 {
     const char *source =
         "x = 5\n"
@@ -536,20 +596,19 @@ int main(void)
         "  print(\"x is greater than z!\")\n"
         "}\n";
 
-    const char *t_source = 
-        "x = 3 + 2\n"
-        "if x == 5 {"
-            "print(x)\n"
-        "}";
-
-
-    Instruction out_instruct[MAX_CODE];
-    int code_count = compile(source, out_instruct); // vm doesnt have code count at the moment
+    Instruction *out_instruct;
+    int code_count = compile(source, &out_instruct);
 
     VM vm = {
         .running = true,
         .ip = 0,
         .sp = -1,
+        .code_count = code_count,
+
+        .stack = malloc(INIT_STACK_SIZE * sizeof(Value)),
+        .stack_capacity = INIT_STACK_SIZE,
+        .memory = malloc(INIT_MEMORY_SIZE * sizeof(Value)),
+        .memory_capacity = INIT_MEMORY_SIZE,
     };
 
     while (vm.running)
@@ -558,9 +617,10 @@ int main(void)
         eval(instruction, &vm);
         vm.ip++;
     }
+    
+    freeStringOperands(out_instruct, code_count);
+    free(out_instruct);
+    free(vm.memory);
+    free(vm.stack);
     return 0;
 }
-
-
-// don't forget that jumping by 6 means incrementing ip by 7 rn, since main loop does +1. we'll look at that later
-// check if the modulo is now better and then just make sure compiler and vm are compatible and fix the rest of the mistakes.

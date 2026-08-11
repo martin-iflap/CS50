@@ -116,7 +116,7 @@ static int emitJumpPlaceholder(Compiler *compiler, InstructionSet op)
 static void patchJumpToHere(Compiler *compiler, int jumpIndex)
 // Patches a previously emitted jump so its offset lands on the chunk's current end
 {
-    compiler->chunk.code[jumpIndex].operand.offset = compiler->chunk.count - jumpIndex - 1; // added -1 to ensure all numbers match
+    compiler->chunk.code[jumpIndex].operand.offset = compiler->chunk.count - jumpIndex - 1; // added -1 to ensure good match in vm
 }
 
 // ----------------------------------------  TOKEN -> OPCODE  -----------------------------------------
@@ -237,7 +237,7 @@ static void compileWhileStmt(Compiler *compiler, Statement *statement)
 
     // jump back to re-check the condition
     int jumpBackIndex = emitJumpPlaceholder(compiler, JMP);
-    compiler->chunk.code[jumpBackIndex].operand.offset = loopStart - jumpBackIndex - 1; // -1 to deal with the offset
+    compiler->chunk.code[jumpBackIndex].operand.offset = loopStart - jumpBackIndex - 1; // -1 to adjust it correctly
 
     // false-condition jump lands here: right after the loop
     patchJumpToHere(compiler, jumpIfFalseIndex);

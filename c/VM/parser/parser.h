@@ -4,8 +4,6 @@
 #include "../token.h"
 #include "../arena/arena_allocator.h"
 
-#define MAX_STMNTS 100
-
 
 // ------------------------------------------  EXPRESSION  -----------------------------------------
 typedef enum
@@ -116,7 +114,8 @@ struct Statement
 
 struct Program
 {
-    Statement *statements[MAX_STMNTS];
+    Statement *statements;
+    int stmt_capacity;
     int statement_count;
 };
 

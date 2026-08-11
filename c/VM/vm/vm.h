@@ -3,8 +3,6 @@
 
 #include <stdbool.h>
 
-#define STACK_SIZE 256
-#define MEM_SIZE 256
 
 // -------------------  Runtime values  ----------------------
 
@@ -94,10 +92,17 @@ typedef struct {
     bool running;
     int ip;     // instruction pointer
     int sp;     // stack pointer
+    int code_count;
 
-    Value stack[STACK_SIZE]; // stack
-    Value memory[MEM_SIZE]; // memory array
+    Value *stack; // stack
+    int stack_capacity;
+    Value *memory; // memory array
+    int memory_capacity;
 } VM;
+
+// -------------------------------  Run VM  -----------------------------------
+
+int runVM(const char *source);
 
 
 #endif

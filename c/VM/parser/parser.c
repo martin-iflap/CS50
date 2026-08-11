@@ -9,7 +9,8 @@
 #include "../arena/arena_allocator.h"
 #include "parser.h"
 
-#define MAX_STMNTS 100
+#define INIT_STMT_CAPACITY 100
+#define INIT_TOKEN_CAPACITY 128
 
 // ------------------------------------------  HELPERS  -----------------------------------------------
 
@@ -53,6 +54,11 @@ static bool consume(Parser *parser, TokenType expected)
 
     advance(parser);
     return true;
+}
+
+static bool isValidIdentifier(Expression *exp)
+{
+    return exp != NULL && exp->type == VariableExpr;
 }
 
 // -----------------------------------------  PARSE EXPRESSIONS  --------------------------------------------
@@ -281,8 +287,14 @@ Expression *parseAssignment(Parser *parser)
     Expression *left = parseAndOr(parser);
     Token token = peek(parser);
 
-    if(token.type == TOKEN_EQUAL) // convert to while perhaps?
+    if(token.type == TOKEN_EQUAL)
     {
+        if(!isValidIdentifier(left))
+        {
+            printf("Invalid assignment expression. Left side must be a variable.\n");
+            exit(1);
+        }
+
         Token operator = token;
         advance(parser);
         Expression *right = parseAndOr(parser);
@@ -314,34 +326,41 @@ Program *parseBlock(Parser *parser)
 {
     Program *small_program = arena_alloc(parser->arena, sizeof(Program));
     small_program->statement_count = 0;
+    small_program->stmt_capacity = INIT_STMT_CAPACITY;
+    small_program->statements = malloc(small_program->stmt_capacity * sizeof(Statement));
 
-    while(!match(parser, TOKEN_RBRACE) && !isAtEnd(parser))
+    while (!isAtEnd(parser))
     {
         while (peek(parser).type == TOKEN_NEWLINE)
         {
-            if(!consume(parser, TOKEN_NEWLINE))
+            if (!consume(parser, TOKEN_NEWLINE))
             {
                 printf("Consume failed in parseBlock.\n");
                 exit(1);
             }
         }
 
-        if (isAtEnd(parser))
+        if (match(parser, TOKEN_RBRACE) || isAtEnd(parser))
             break;
 
         Statement *stmt = parseStatement(parser);
-        small_program->statements[small_program->statement_count++] = stmt;
-    
-        if(!match(parser, TOKEN_NEWLINE) && !match(parser, TOKEN_RBRACE))
+
+        if(small_program->statement_count >= small_program->stmt_capacity) // double the size if needed
         {
-            printf("Statement not terminated.");
+            small_program->stmt_capacity *= 2;
+            small_program->statements = realloc(small_program->statements, small_program->stmt_capacity * sizeof(Statement));
+        }
+
+        small_program->statements[small_program->statement_count++] = *stmt;
+
+        if (!match(parser, TOKEN_NEWLINE) && !match(parser, TOKEN_RBRACE))
+        {
+            printf("Statement not terminated.\n");
             exit(1);
         }
-    
     }
     return small_program;
 }
-
 // --------------------------------------------  PARSE STATEMENTS  --------------------------------------------
 
 Statement *parseIfStatement(Parser *parser)
@@ -503,7 +522,7 @@ void parseProgram(Parser *parser, Program *program)
         {
             if(!consume(parser, TOKEN_NEWLINE))
             {
-                printf("Consume failed in parseProgram.\n"); // probably same problem here!
+                printf("Consume failed in parseProgram.\n");
                 exit(1);
             }
         }
@@ -512,7 +531,14 @@ void parseProgram(Parser *parser, Program *program)
             break;
 
         Statement *stmt = parseStatement(parser);
-        program->statements[program->statement_count++] = stmt;
+
+        if(program->statement_count >= program->stmt_capacity) // double the size if needed
+        {
+            program->stmt_capacity *= 2;
+            program->statements = realloc(program->statements, program->stmt_capacity * sizeof(Statement));
+        }
+
+        program->statements[program->statement_count++] = *stmt;
 
         if(!match(parser, TOKEN_NEWLINE) && !isAtEnd(parser))
         {
@@ -529,8 +555,8 @@ void printProgram(Program *program, int depth); // fwd decl
 
 void parse(const char *source, Program *out_program, Arena **out_arena)
 {
-    Token tokens[MAX_TOKENS];
-    lex(source, tokens);
+    Token *tokens;
+    lex(source, &tokens, INIT_TOKEN_CAPACITY);
 
     Arena *arena = arena_create(65536);
 
@@ -541,12 +567,15 @@ void parse(const char *source, Program *out_program, Arena **out_arena)
     };
 
     out_program->statement_count = 0;
+    out_program->stmt_capacity = INIT_STMT_CAPACITY;
+    out_program->statements = malloc(out_program->stmt_capacity * sizeof(Statement));
     parseProgram(&parser, out_program);
 
     *out_arena = arena;
 
     printf("\n========== PROGRAM ==========\n\n");
     printProgram(out_program, 0);
+    free(tokens);
 }
 
 // ------------------------------------------  MAIN  -------------------------------------------------
@@ -566,8 +595,8 @@ int parser_main()
         "  print(\"x is greater than z!\")\n"
         "}\n";
 
-    Token tokens[MAX_TOKENS];
-    lex(source, tokens); // still returns token_count but i think i don't need it
+    Token *tokens;
+    lex(source, &tokens, INIT_TOKEN_CAPACITY);
 
     Arena *arena = arena_create(65536);
 
@@ -586,14 +615,8 @@ int parser_main()
     printProgram(&program, 0);
 
     arena_destroy(arena);
+    free(tokens);
 }
-
-
-// TODOs:
-// convert assignment to while loop?
-// add check to assignment expression that L side is variable expression
-// keep an eye on the consume new line logic
-
 
 // ------------------------------------------  PRINT PROGRAM  ----------------------------------------
 
@@ -724,5 +747,5 @@ void printProgram(Program *program, int depth)
     }
 
     for (int i = 0; i < program->statement_count; i++)
-        printStatement(program->statements[i], depth);
+        printStatement(&program->statements[i], depth);
 }
