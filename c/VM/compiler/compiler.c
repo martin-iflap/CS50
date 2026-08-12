@@ -245,7 +245,7 @@ static void compileWhileStmt(Compiler *compiler, Statement *statement)
 
 static void compileReturnStmt(Compiler *compiler, Statement *statement)
 {
-    compileExpression(compiler, statement->ExpressionStmt.expression);
+    // compileExpression(compiler, statement->ExpressionStmt.expression); use later if return actually returns real values
     emitSimple(compiler, RETURN);
 }
 

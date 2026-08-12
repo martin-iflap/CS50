@@ -42,9 +42,8 @@ int main() {
 }
 
 
-// take a look at elifs, rn double if creates unterminated stmt in parser, check out why
-// keep in mind return is inconsistent
-// add a way to print newlines
+// there are no elifs, only if else, keep an eye on the ifs with the weird new logic i added
+// no calls and functions, return acts as halt right now
 
 // COMPILE:
 // gcc arena/arena_allocator.c lexer/lexer.c parser/parser.c compiler/compiler.c vm/vm.c main.c -o code

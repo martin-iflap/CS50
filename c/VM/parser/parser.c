@@ -400,6 +400,7 @@ Statement *parseIfStatement(Parser *parser)
     }
     else
     {
+        parser->current -=1;
         stmt->IfStmt.elseBody = NULL;
     }
 
@@ -454,7 +455,7 @@ Statement *parseReturnStatement(Parser *parser)
 {
     Statement *stmt = arena_alloc(parser->arena, sizeof(Statement));
     stmt->type = ReturnStmt;
-    stmt->ReturnStmt.expression = parseExpression(parser);
+    // stmt->ReturnStmt.expression = parseExpression(parser); perhaps use this later if we want to return actuall values
     
     return stmt;
 }
@@ -548,10 +549,8 @@ void parseProgram(Parser *parser, Program *program)
     }
 }
 
-// ------------------------------------------  MAIN  ----------------------------------------------------
-void printProgram(Program *program, int depth); // fwd decl
-
 // ------------------------------------------  PARSE  ---------------------------------------------------
+void printProgram(Program *program, int depth); // fwd decl
 
 void parse(const char *source, Program *out_program, Arena **out_arena)
 {

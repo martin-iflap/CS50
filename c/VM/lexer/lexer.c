@@ -157,6 +157,47 @@ void scanIdentifier(Lexer *lexer)
     }
 }
 
+// -------------------------------------  PROCESS STRING ESCAPES  -----------------------------------
+
+static void processStringEscapes(Token *token)
+// Interprets \n, \t, \\, \", \' in-place within lexeme, shrinking the string as needed.
+// this function also copies the string to the literal.string of the token !
+{
+    char *src = token->lexeme + 1;                       // skip opening quote
+    char *dst = src;
+    int len = strlen(token->lexeme);
+    char *end = token->lexeme + len - 1;                  // stop before closing quote
+
+    while (src < end)
+    {
+        if (*src == '\\' && src + 1 < end)
+        {
+            src++;
+            switch (*src)
+            {
+                case 'n':  *dst++ = '\n'; break;
+                case 't':  *dst++ = '\t'; break;
+                case '\\': *dst++ = '\\'; break;
+                case '"':  *dst++ = '"';  break;
+                case '\'': *dst++ = '\''; break;
+                default:
+                    // unknown escape — keep both characters literally
+                    *dst++ = '\\';
+                    *dst++ = *src;
+                    break;
+            }
+            src++;
+        }
+        else
+        {
+            *dst++ = *src++; // just copy the char to the dst
+        }
+    }
+
+    *dst = '\0';
+    token->literal.string = token->lexeme + 1;
+}
+
 // --------------------------------------  SCAN NUMBER  -----------------------------------------
 
 void scanNumber(Lexer *lexer)
@@ -326,6 +367,10 @@ void scanToken(Lexer *lexer)
                     printf("Lexer Error: Newline in string literal.\n");
                     return;
                 }
+                if (peek(lexer) == '\\' && peekNext(lexer) != '\0')
+                {
+                    advance(lexer); // skip the backslash so its escaped char isn't mistaken for the closing quote
+                }
                 advance(lexer);
             }
 
@@ -379,9 +424,7 @@ void lexicalAnalyzer(Lexer *lexer)
         Token *token = &lexer->tokens[i];
         if (token->type == TOKEN_STRING)
         {
-            int clean_len = strlen(token->lexeme) - 2;
-            token->lexeme[clean_len + 1] = '\0';
-            token->literal.string = token->lexeme + 1;
+            processStringEscapes(token); // also sets the toke->literal.string
         }
     }
 }
